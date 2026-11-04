@@ -483,8 +483,10 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
             }
 
             PageDots(pager.pageCount, pager.currentPage)
-            if (s.showDock) {
+            if (s.showDock && (vm.dock.isNotEmpty() || vm.editMode)) {
                 Dock(vm, apps, hits, dragId, mergeTarget)
+            } else {
+                hits.dock = Rect.Zero
             }
             Spacer(Modifier.height(8.dp))
         }
