@@ -31,7 +31,15 @@ class Storage(context: Context) {
                 weatherCity = o.optString("weatherCity", d.weatherCity),
                 weatherLat = o.optDouble("weatherLat", d.weatherLat),
                 weatherLon = o.optDouble("weatherLon", d.weatherLon),
-                swipeDownNotifications = o.optBoolean("swipeDownNotifications", d.swipeDownNotifications),
+                swipeDownMode = o.optInt("swipeDownMode", d.swipeDownMode),
+                showClock = o.optBoolean("showClock", d.showClock),
+                clockSize = o.optDouble("clockSize", d.clockSize.toDouble()).toFloat(),
+                clockWeight = o.optInt("clockWeight", d.clockWeight),
+                clockFont = o.optInt("clockFont", d.clockFont),
+                clockAlign = o.optInt("clockAlign", d.clockAlign),
+                clockColor = o.optLong("clockColor", d.clockColor),
+                showDate = o.optBoolean("showDate", d.showDate),
+                iconShape = o.optInt("iconShape", d.iconShape),
                 doubleTapLock = o.optBoolean("doubleTapLock", d.doubleTapLock),
                 drawerSort = runCatching { DrawerSort.valueOf(o.optString("drawerSort")) }.getOrDefault(d.drawerSort),
                 searchEngine = o.optInt("searchEngine", d.searchEngine),
@@ -59,7 +67,15 @@ class Storage(context: Context) {
             .put("weatherCity", s.weatherCity)
             .put("weatherLat", s.weatherLat)
             .put("weatherLon", s.weatherLon)
-            .put("swipeDownNotifications", s.swipeDownNotifications)
+            .put("swipeDownMode", s.swipeDownMode)
+            .put("showClock", s.showClock)
+            .put("clockSize", s.clockSize.toDouble())
+            .put("clockWeight", s.clockWeight)
+            .put("clockFont", s.clockFont)
+            .put("clockAlign", s.clockAlign)
+            .put("clockColor", s.clockColor)
+            .put("showDate", s.showDate)
+            .put("iconShape", s.iconShape)
             .put("doubleTapLock", s.doubleTapLock)
             .put("drawerSort", s.drawerSort.name)
             .put("searchEngine", s.searchEngine)
@@ -137,6 +153,38 @@ class Storage(context: Context) {
         val a = JSONArray()
         todos.forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("done", it.done)) }
         prefs.edit().putString("todos", a.toString()).apply()
+    }
+
+    fun loadPages(): List<List<String>>? {
+        val s = prefs.getString("pages", null) ?: return null
+        return runCatching {
+            val a = JSONArray(s)
+            List(a.length()) { i -> val p = a.getJSONArray(i); List(p.length()) { p.getString(it) } }
+        }.getOrNull()
+    }
+
+    fun savePages(pages: List<List<String>>) {
+        val a = JSONArray()
+        pages.forEach { a.put(JSONArray(it)) }
+        prefs.edit().putString("pages", a.toString()).apply()
+    }
+
+    fun loadFolders(): Map<String, Folder> {
+        val s = prefs.getString("folders", null) ?: return emptyMap()
+        return runCatching {
+            val a = JSONArray(s)
+            List(a.length()) {
+                val o = a.getJSONObject(it)
+                val apps = o.getJSONArray("apps")
+                Folder(o.getString("id"), o.optString("name"), List(apps.length()) { i -> apps.getString(i) })
+            }.associateBy { it.id }
+        }.getOrDefault(emptyMap())
+    }
+
+    fun saveFolders(folders: Map<String, Folder>) {
+        val a = JSONArray()
+        folders.values.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("apps", JSONArray(it.apps))) }
+        prefs.edit().putString("folders", a.toString()).apply()
     }
 
     fun getString(key: String): String? = prefs.getString(key, null)

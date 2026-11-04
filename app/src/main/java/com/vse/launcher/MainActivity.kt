@@ -49,6 +49,8 @@ class MainActivity : ComponentActivity() {
         // Нажатие «Домой» — возвращаемся на главный экран
         if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
             stack.value = emptyList()
+            if (vm.editMode) vm.exitEditMode()
+            vm.homeSignal++
         }
     }
 
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         // Вернулись из приложения — ящик приложений закрыт
         if (stack.value.lastOrNull() is Screen.Drawer) stack.value = emptyList()
+        if (vm.editMode) vm.exitEditMode()
     }
 }
 

@@ -45,6 +45,7 @@ fun AppIcon(
     showLabel: Boolean,
     onWallpaper: Boolean,
     modifier: Modifier = Modifier,
+    folderId: String? = null,
     onLaunched: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -82,29 +83,38 @@ fun AppIcon(
                 )
             }
         }
-        AppMenu(app, vm, expanded = menu, onDismiss = { menu = false }, onRename = { renaming = true })
+        AppMenu(app, vm, expanded = menu, onDismiss = { menu = false }, onRename = { renaming = true }, folderId = folderId)
     }
     if (renaming) RenameDialog(app, vm) { renaming = false }
 }
 
 @Composable
-fun AppMenu(app: AppInfo, vm: LauncherViewModel, expanded: Boolean, onDismiss: () -> Unit, onRename: () -> Unit) {
-    val isFav = app.key in vm.favorites
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+fun AppMenu(
+    app: AppInfo,
+    vm: LauncherViewModel,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    folderId: String? = null,
+    onEdit: (() -> Unit)? = null,
+) {
+    val onHome = vm.isOnHome(app.key)
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, shape = RoundedCornerShape(16.dp)) {
         Text(
             app.label,
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
         HorizontalDivider()
-        MenuItem(if (isFav) "Убрать с главного экрана" else "На главный экран", if (isFav) Icons.Default.StarOutline else Icons.Default.Star) {
-            vm.toggleFavorite(app); onDismiss()
+        if (folderId != null) {
+            MenuItem("Вынуть из папки", Icons.Default.DriveFileMove) { vm.removeFromFolder(folderId, app.key); onDismiss() }
+        } else if (onHome) {
+            MenuItem("Убрать с экрана «Домой»", Icons.Default.RemoveCircleOutline) { vm.removeFromHome(app.key); onDismiss() }
+        } else {
+            MenuItem("Добавить на экран «Домой»", Icons.Default.AddToHomeScreen) { vm.addToHome(app.key); onDismiss() }
         }
-        if (isFav) {
-            MenuItem("Сдвинуть влево", Icons.Default.ChevronLeft) { vm.moveFavorite(app, -1); onDismiss() }
-            MenuItem("Сдвинуть вправо", Icons.Default.ChevronRight) { vm.moveFavorite(app, 1); onDismiss() }
-        }
-        MenuItem("Переименовать", Icons.Default.Edit) { onDismiss(); onRename() }
+        if (onEdit != null) MenuItem("Изменить экран «Домой»", Icons.Default.Edit) { onDismiss(); onEdit() }
+        MenuItem("Переименовать", Icons.Default.DriveFileRenameOutline) { onDismiss(); onRename() }
         MenuItem("Скрыть", Icons.Default.VisibilityOff) { vm.setHidden(app, true); onDismiss() }
         MenuItem("О приложении", Icons.Default.Info) { vm.openAppInfo(app); onDismiss() }
         if (!app.isSystem) MenuItem("Удалить", Icons.Default.Delete) { vm.uninstall(app); onDismiss() }

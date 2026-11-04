@@ -30,6 +30,9 @@ import com.vse.launcher.util.SystemActions
 import com.vse.launcher.util.Weather
 import kotlinx.coroutines.launch
 
+val ICON_SHAPES = listOf("Как на iPhone", "Круглые", "Системные")
+val SWIPE_DOWN = listOf("Поиск", "Уведомления", "Ничего")
+
 @Composable
 fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> Unit) {
     val ctx = LocalContext.current
@@ -38,6 +41,8 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
     var nameDialog by remember { mutableStateOf(false) }
     var themeDialog by remember { mutableStateOf(false) }
     var engineDialog by remember { mutableStateOf(false) }
+    var shapeDialog by remember { mutableStateOf(false) }
+    var swipeDialog by remember { mutableStateOf(false) }
 
     ScreenScaffold("Настройки лаунчера", onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
@@ -73,21 +78,23 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
             SliderRow("Размер иконок: ${s.iconSizeDp} dp", s.iconSizeDp.toFloat(), 36f..72f, 8) { v -> vm.updateSettings { it.copy(iconSizeDp = v.toInt()) } }
             SliderRow("Затемнение обоев: ${(s.wallpaperDim * 100).toInt()}%", s.wallpaperDim, 0f..0.8f, 0) { v -> vm.updateSettings { it.copy(wallpaperDim = v) } }
             SwitchRow(Icons.Default.Title, "Подписи под иконками", null, s.showLabels) { v -> vm.updateSettings { it.copy(showLabels = v) } }
+            ClickRow(Icons.Default.Crop54, "Форма иконок", ICON_SHAPES[s.iconShape]) { shapeDialog = true }
+
+            SectionTitle("Часы")
+            InfoRow("Совет: удерживайте часы на рабочем столе, чтобы настроить их прямо там.")
+            ClockControls(vm)
 
             SectionTitle("Рабочий стол")
-            SwitchRow(Icons.Default.Schedule, "24-часовой формат", null, s.use24h) { v -> vm.updateSettings { it.copy(use24h = v) } }
-            SwitchRow(Icons.Default.Timer, "Показывать секунды", null, s.showSeconds) { v -> vm.updateSettings { it.copy(showSeconds = v) } }
-            SwitchRow(Icons.Default.WavingHand, "Приветствие", null, s.showGreeting) { v -> vm.updateSettings { it.copy(showGreeting = v) } }
-            SwitchRow(Icons.Default.BatteryStd, "Заряд батареи", null, s.showBattery) { v -> vm.updateSettings { it.copy(showBattery = v) } }
-            SwitchRow(Icons.Default.WbSunny, "Погода", null, s.showWeather) { v -> vm.updateSettings { it.copy(showWeather = v) }; vm.refreshWeather() }
+            ClickRow(Icons.Default.Edit, "Изменить экран «Домой»", "Перетаскивание иконок, папки, новые экраны") { vm.editMode = true; onBack() }
             ClickRow(Icons.Default.LocationCity, "Город для погоды", s.weatherCity) { cityDialog = true }
-            SwitchRow(Icons.Default.Widgets, "Панель инструментов", "Фонарик, калькулятор, заметки…", s.showTools) { v -> vm.updateSettings { it.copy(showTools = v) } }
-            SwitchRow(Icons.Default.Dock, "Док внизу", "Телефон, сообщения, браузер, камера", s.showDock) { v -> vm.updateSettings { it.copy(showDock = v) } }
+            SwitchRow(Icons.Default.WavingHand, "Приветствие на экране «Сегодня»", null, s.showGreeting) { v -> vm.updateSettings { it.copy(showGreeting = v) } }
+            SwitchRow(Icons.Default.Widgets, "Инструменты на экране «Сегодня»", null, s.showTools) { v -> vm.updateSettings { it.copy(showTools = v) } }
+            SwitchRow(Icons.Default.Dock, "Док внизу", null, s.showDock) { v -> vm.updateSettings { it.copy(showDock = v) } }
 
             SectionTitle("Жесты")
-            SwitchRow(Icons.Default.SwipeDown, "Свайп вниз — уведомления", null, s.swipeDownNotifications) { v -> vm.updateSettings { it.copy(swipeDownNotifications = v) } }
+            ClickRow(Icons.Default.SwipeDown, "Свайп вниз", SWIPE_DOWN[s.swipeDownMode]) { swipeDialog = true }
             SwitchRow(Icons.Default.Lock, "Двойной тап — заблокировать", "Нужна служба спец. возможностей", s.doubleTapLock) { v -> vm.updateSettings { it.copy(doubleTapLock = v) } }
-            InfoRow("Свайп вверх — все приложения. Долгое нажатие на пустом месте — меню рабочего стола.")
+            InfoRow("Свайп вверх — все приложения. Свайп вправо — экран «Сегодня» с виджетами. Долгое нажатие на пустом месте — режим редактирования: иконки можно перетаскивать, класть одну на другую (получится папка) и добавлять новые экраны.")
 
             SectionTitle("Поиск")
             ClickRow(Icons.Default.TravelExplore, "Поисковик", SEARCH_ENGINES.getOrElse(s.searchEngine) { SEARCH_ENGINES[0] }.first) { engineDialog = true }
@@ -113,6 +120,12 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
         ChoiceDialog("Поисковик", SEARCH_ENGINES.map { it.first }, s.searchEngine, { engineDialog = false }) { i ->
             vm.updateSettings { it.copy(searchEngine = i) }
         }
+    }
+    if (shapeDialog) {
+        ChoiceDialog("Форма иконок", ICON_SHAPES, s.iconShape, { shapeDialog = false }) { i -> vm.updateSettings { it.copy(iconShape = i) } }
+    }
+    if (swipeDialog) {
+        ChoiceDialog("Свайп вниз", SWIPE_DOWN, s.swipeDownMode, { swipeDialog = false }) { i -> vm.updateSettings { it.copy(swipeDownMode = i) } }
     }
     if (nameDialog) {
         var text by remember { mutableStateOf(s.userName) }

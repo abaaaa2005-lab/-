@@ -14,7 +14,14 @@ data class AppInfo(
     val icon: ImageBitmap?,
     val installTime: Long,
     val isSystem: Boolean,
+    val category: Int = -1,
 )
+
+/** Папка на рабочем столе. */
+data class Folder(val id: String, val name: String, val apps: List<String>)
+
+const val FOLDER_PREFIX = "folder:"
+const val DOCK_MAX = 4
 
 data class Note(
     val id: Long,
@@ -47,9 +54,9 @@ data class Settings(
     val dynamicColor: Boolean = false,
     val accent: Long = 0xFF6C5CE7,
     val columns: Int = 4,
-    val iconSizeDp: Int = 52,
+    val iconSizeDp: Int = 58,
     val showLabels: Boolean = true,
-    val wallpaperDim: Float = 0.25f,
+    val wallpaperDim: Float = 0.15f,
     val use24h: Boolean = true,
     val showSeconds: Boolean = false,
     val showGreeting: Boolean = true,
@@ -60,8 +67,18 @@ data class Settings(
     val weatherCity: String = "Москва",
     val weatherLat: Double = 55.7558,
     val weatherLon: Double = 37.6173,
-    val swipeDownNotifications: Boolean = true,
-    val doubleTapLock: Boolean = true,
+    val swipeDownMode: Int = 0,          // 0 — поиск, 1 — уведомления, 2 — ничего
+    val doubleTapLock: Boolean = false,
+    // Часы
+    val showClock: Boolean = true,
+    val clockSize: Float = 84f,
+    val clockWeight: Int = 1,           // 0..4: тонкий..очень жирный
+    val clockFont: Int = 0,             // 0 обычный, 1 с засечками, 2 моноширинный, 3 рукописный
+    val clockAlign: Int = 1,            // 0 слева, 1 по центру, 2 справа
+    val clockColor: Long = 0xFFFFFFFF,
+    val showDate: Boolean = true,
+    // Иконки
+    val iconShape: Int = 0,             // 0 как на iPhone, 1 круг, 2 системная
     val drawerSort: DrawerSort = DrawerSort.ALPHA,
     val searchEngine: Int = 0,
     val userName: String = "",

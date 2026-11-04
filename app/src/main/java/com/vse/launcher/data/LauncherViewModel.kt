@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vse.launcher.util.IconRenderer
 import com.vse.launcher.util.SystemActions
 import com.vse.launcher.util.Weather
 import com.vse.launcher.util.WeatherData
@@ -54,6 +55,20 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var torchOn by mutableStateOf(false)
         private set
+
+    // ---------- Рабочий стол (экраны, док, папки) ----------
+    var pages by mutableStateOf<List<List<String>>>(storage.loadPages() ?: emptyList())
+        private set
+    var dock by mutableStateOf(storage.loadStringList("dock"))
+        private set
+    var folders by mutableStateOf(storage.loadFolders())
+        private set
+    var editMode by mutableStateOf(false)
+    var homeSignal by mutableStateOf(0)
+    private var homeInitialized = storage.loadPages() != null
+    private var known = storage.loadStringList("known").toSet()
+    private var capFirst = 0
+    private var capOther = 0
 
     private val iconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap?> =
         java.util.Collections.synchronizedMap(HashMap())
@@ -94,8 +109,16 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                         if (cn.packageName == ctx.packageName) return@mapNotNull null
                         val userSuffix = if (user == Process.myUserHandle()) "" else "#${user.hashCode()}"
                         val key = "${cn.packageName}/${cn.className}$userSuffix"
-                        val icon = iconCache.getOrPut(key) {
-                            runCatching { info.getBadgedIcon(0).toBitmap(sizePx, sizePx).asImageBitmap() }.getOrNull()
+                        val shape = settings.iconShape
+                        val icon = iconCache.getOrPut("$key@$shape") {
+                            runCatching {
+                                var bmp = IconRenderer.render(info.getIcon(0), sizePx, shape)
+                                if (user != Process.myUserHandle()) {
+                                    bmp = pm.getUserBadgedIcon(android.graphics.drawable.BitmapDrawable(ctx.resources, bmp), user)
+                                        .toBitmap(sizePx, sizePx)
+                                }
+                                bmp.asImageBitmap()
+                            }.getOrNull()
                         }
                         val original = info.label?.toString() ?: cn.packageName
                         val installTime = runCatching { pm.getPackageInfo(cn.packageName, 0).firstInstallTime }.getOrDefault(0L)
@@ -109,13 +132,22 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                             icon = icon,
                             installTime = installTime,
                             isSystem = (info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                            category = info.applicationInfo.category,
                         )
                     }
                 }
             }
             allApps = list
             loading = false
+            syncHomeWithApps()
         }
+    }
+
+    /** Только для тестов: подставить список приложений. */
+    internal fun setAppsForTest(list: List<AppInfo>) {
+        allApps = list
+        loading = false
+        syncHomeWithApps()
     }
 
     /** Приложения с учётом переименований. */
@@ -205,6 +237,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setHidden(app: AppInfo, hide: Boolean) {
         hidden = if (hide) hidden + app.key else hidden - app.key
+        if (hide) removeFromHome(app.key)
         if (hide && app.key in favorites) {
             favorites = favorites - app.key
             storage.saveStringList("favorites", favorites)
@@ -224,6 +257,224 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         storage.saveIntMap("launchCounts", emptyMap())
     }
 
+    // ---------- Рабочий стол ----------
+
+    fun appMap(): Map<String, AppInfo> = withNames(allApps).associateBy { it.key }
+
+    private fun savePages() {
+        storage.savePages(pages)
+        storage.saveStringList("dock", dock)
+        storage.saveFolders(folders)
+    }
+
+    /** Первый запуск: раскладываем приложения как на iPhone. Потом — добавляем новые и убираем удалённые. */
+    private fun syncHomeWithApps() {
+        if (allApps.isEmpty()) return
+        val keys = allApps.map { it.key }.toSet()
+        if (!homeInitialized) {
+            val pm = ctx.packageManager
+            fun pkgFor(i: android.content.Intent): String? = runCatching {
+                pm.resolveActivity(i, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+            }.getOrNull()?.takeIf { it != "android" }
+            val dockPkgs = listOfNotNull(
+                pkgFor(android.content.Intent(android.content.Intent.ACTION_DIAL)),
+                pkgFor(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:"))),
+                pkgFor(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))),
+                pkgFor(android.content.Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
+            ).distinct()
+            val main = allApps.filter { it.user == Process.myUserHandle() }
+            dock = dockPkgs.mapNotNull { p -> main.firstOrNull { it.packageName == p }?.key }.take(DOCK_MAX)
+            val rest = visibleApps().map { it.key }.filter { it !in dock }
+            val favFirst = favorites.filter { it in rest }
+            pages = listOf(favFirst + rest.filter { it !in favFirst })
+            homeInitialized = true
+        } else {
+            // Новые приложения — в конец последнего экрана, как на iPhone
+            val newOnes = allApps.map { it.key }.filter { it !in known && it !in hidden && !isOnHome(it) }
+            if (newOnes.isNotEmpty() && known.isNotEmpty()) {
+                pages = if (pages.isEmpty()) listOf(newOnes) else pages.dropLast(1) + listOf(pages.last() + newOnes)
+            }
+            // Удалённые приложения убираем отовсюду
+            pages = pages.map { p -> p.filter { it.startsWith(FOLDER_PREFIX) || it in keys } }
+            dock = dock.filter { it.startsWith(FOLDER_PREFIX) || it in keys }
+            folders = folders.mapValues { (_, f) -> f.copy(apps = f.apps.filter { it in keys }) }
+            dissolveSmallFolders()
+        }
+        if (pages.isEmpty()) pages = listOf(emptyList())
+        known = keys
+        storage.saveStringList("known", known)
+        normalize()
+        savePages()
+    }
+
+    fun isOnHome(key: String) = pages.any { key in it } || key in dock || folders.values.any { key in it.apps }
+
+    fun setCapacity(first: Int, other: Int) {
+        if (first == capFirst && other == capOther) return
+        capFirst = first
+        capOther = other
+        normalize()
+        savePages()
+    }
+
+    /** Если экран переполнен — лишние иконки переезжают на следующий. */
+    private fun normalize() {
+        if (capFirst <= 0 || capOther <= 0) return
+        val res = mutableListOf<List<String>>()
+        var carry = emptyList<String>()
+        pages.forEachIndexed { i, p ->
+            val cap = if (i == 0) capFirst else capOther
+            val all = carry + p
+            res += all.take(cap)
+            carry = all.drop(cap)
+        }
+        while (carry.isNotEmpty()) {
+            res += carry.take(capOther)
+            carry = carry.drop(capOther)
+        }
+        if (res.isEmpty()) res += emptyList<String>()
+        if (res != pages) pages = res
+    }
+
+    private fun removeEverywhere(id: String) {
+        pages = pages.map { p -> p.filter { it != id } }
+        dock = dock.filter { it != id }
+    }
+
+    sealed interface Target {
+        data class Page(val page: Int, val index: Int) : Target
+        data class Dock(val index: Int) : Target
+    }
+
+    fun locate(id: String): Target? {
+        dock.indexOf(id).takeIf { it >= 0 }?.let { return Target.Dock(it) }
+        pages.forEachIndexed { pi, p -> p.indexOf(id).takeIf { it >= 0 }?.let { return Target.Page(pi, it) } }
+        return null
+    }
+
+    /** Переместить иконку (живое перемещение при перетаскивании). */
+    fun moveItem(id: String, target: Target): Boolean {
+        val from = locate(id)
+        if (from == target) return true
+        if (target is Target.Dock && from !is Target.Dock && dock.size >= DOCK_MAX) return false
+        removeEverywhere(id)
+        when (target) {
+            is Target.Dock -> dock = dock.toMutableList().apply { add(target.index.coerceIn(0, size), id) }
+            is Target.Page -> {
+                val list = pages.toMutableList()
+                while (list.size <= target.page) list += emptyList<String>()
+                list[target.page] = list[target.page].toMutableList().apply { add(target.index.coerceIn(0, size), id) }
+                pages = list
+            }
+        }
+        normalize()
+        savePages()
+        return true
+    }
+
+    /** Бросили иконку на другую — создаём папку или кладём в существующую. */
+    fun mergeInto(dragId: String, targetId: String) {
+        if (dragId == targetId || dragId.startsWith(FOLDER_PREFIX)) return
+        if (targetId.startsWith(FOLDER_PREFIX)) {
+            val f = folders[targetId] ?: return
+            removeEverywhere(dragId)
+            folders = folders + (targetId to f.copy(apps = f.apps + dragId))
+        } else {
+            val pos = locate(targetId) ?: return
+            removeEverywhere(dragId)
+            val id = FOLDER_PREFIX + System.currentTimeMillis()
+            val map = appMap()
+            val name = folderName(listOfNotNull(map[targetId], map[dragId]))
+            folders = folders + (id to Folder(id, name, listOf(targetId, dragId)))
+            when (pos) {
+                is Target.Dock -> dock = dock.map { if (it == targetId) id else it }
+                is Target.Page -> pages = pages.map { p -> p.map { if (it == targetId) id else it } }
+            }
+        }
+        normalize()
+        savePages()
+    }
+
+    private fun folderName(apps: List<AppInfo>): String {
+        val cat = apps.map { it.category }.distinct().singleOrNull()
+        return when (cat) {
+            ApplicationInfo.CATEGORY_GAME -> "Игры"
+            ApplicationInfo.CATEGORY_SOCIAL -> "Общение"
+            ApplicationInfo.CATEGORY_AUDIO -> "Музыка"
+            ApplicationInfo.CATEGORY_VIDEO -> "Видео"
+            ApplicationInfo.CATEGORY_IMAGE -> "Фото"
+            ApplicationInfo.CATEGORY_NEWS -> "Новости"
+            ApplicationInfo.CATEGORY_MAPS -> "Навигация"
+            ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Работа"
+            else -> if (apps.all { it.isSystem }) "Утилиты" else "Папка"
+        }
+    }
+
+    fun renameFolder(id: String, name: String) {
+        val f = folders[id] ?: return
+        folders = folders + (id to f.copy(name = name))
+        savePages()
+    }
+
+    fun removeFromFolder(folderId: String, key: String) {
+        val f = folders[folderId] ?: return
+        folders = folders + (folderId to f.copy(apps = f.apps - key))
+        // Кладём приложение сразу после папки
+        when (val pos = locate(folderId)) {
+            is Target.Page -> moveItem(key, Target.Page(pos.page, pos.index + 1))
+            else -> addToHome(key)
+        }
+        dissolveSmallFolders()
+        normalize()
+        savePages()
+    }
+
+    private fun dissolveSmallFolders() {
+        val small = folders.values.filter { it.apps.size <= 1 }
+        if (small.isEmpty()) return
+        small.forEach { f ->
+            val repl = f.apps.firstOrNull()
+            pages = pages.map { p -> p.mapNotNull { if (it == f.id) repl else it } }
+            dock = dock.mapNotNull { if (it == f.id) repl else it }
+        }
+        folders = folders - small.map { it.id }.toSet()
+    }
+
+    /** Убрать с экрана «Домой» (приложение останется в библиотеке). */
+    fun removeFromHome(id: String) {
+        if (id.startsWith(FOLDER_PREFIX)) folders = folders - id
+        removeEverywhere(id)
+        folders = folders.mapValues { (_, f) -> f.copy(apps = f.apps - id) }
+        dissolveSmallFolders()
+        savePages()
+    }
+
+    fun addToHome(key: String) {
+        if (isOnHome(key)) return
+        val idx = pages.indices.firstOrNull { i -> pages[i].size < (if (i == 0) capFirst else capOther).coerceAtLeast(1) }
+        pages = if (idx != null) pages.mapIndexed { i, p -> if (i == idx) p + key else p } else pages + listOf(listOf(key))
+        normalize()
+        savePages()
+    }
+
+    fun addPage() {
+        pages = pages + listOf(emptyList())
+        savePages()
+    }
+
+    fun removePage(i: Int) {
+        if (pages.size <= 1 || pages.getOrNull(i)?.isNotEmpty() == true) return
+        pages = pages.filterIndexed { idx, _ -> idx != i }
+        savePages()
+    }
+
+    fun exitEditMode() {
+        editMode = false
+        // Пустые экраны исчезают, как на iPhone
+        val cleaned = pages.filter { it.isNotEmpty() }.ifEmpty { listOf(emptyList()) }
+        if (cleaned != pages) { pages = cleaned; savePages() }
+    }
+
     // ---------- Настройки ----------
 
     fun updateSettings(transform: (Settings) -> Settings) {
@@ -231,6 +482,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         settings = transform(settings)
         storage.saveSettings(settings)
         if (old.weatherLat != settings.weatherLat || old.weatherLon != settings.weatherLon) refreshWeather()
+        if (old.iconShape != settings.iconShape) reloadApps()
     }
 
     // ---------- Погода ----------
