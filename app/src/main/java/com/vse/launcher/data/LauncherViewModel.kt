@@ -61,7 +61,16 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     // ---------- Рабочий стол (экраны, док, папки) ----------
-    var pages by mutableStateOf<List<List<String>>>(storage.loadPages() ?: emptyList())
+    // Рабочие столы (как в Windows): у каждого свои экраны и обои, док общий — как панель задач
+    var desktops by mutableStateOf(storage.loadDesktops())
+        private set
+    var activeDesktop by mutableStateOf(
+        storage.getString("activeDesktop")?.takeIf { id -> desktops.any { it.id == id } } ?: desktops.first().id
+    )
+        private set
+    var desktopSwitched by mutableStateOf(0L)
+        private set
+    var pages by mutableStateOf<List<List<String>>>(loadDesktopPages(activeDesktop) ?: emptyList())
         private set
     var dock by mutableStateOf(storage.loadStringList("dock"))
         private set
@@ -71,8 +80,12 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     var homeSignal by mutableStateOf(0)
     private var homeInitialized = storage.loadPages() != null
     private var known = storage.loadStringList("known").toSet()
-    private var capFirst = 0
-    private var capOther = 0
+    private var rowsFirst = 0
+    private var rowsOther = 0
+    private var gridCols = 0
+
+    private fun loadDesktopPages(id: String): List<List<String>>? =
+        storage.loadPages("pages_$id") ?: if (id == "main") storage.loadPages() else null
 
     private val iconCache: MutableMap<String, androidx.compose.ui.graphics.ImageBitmap?> =
         java.util.Collections.synchronizedMap(HashMap())
@@ -267,6 +280,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun savePages() {
         storage.savePages(pages)
+        storage.savePages(pages, "pages_$activeDesktop")
         storage.saveStringList("dock", dock)
         storage.saveFolders(folders)
     }
@@ -303,6 +317,11 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
             // Удалённые приложения убираем отовсюду
             pages = pages.map { p -> p.filter { it.startsWith(FOLDER_PREFIX) || it in keys } }
             dock = dock.filter { it.startsWith(FOLDER_PREFIX) || it in keys }
+            desktops.filter { it.id != activeDesktop }.forEach { d ->
+                loadDesktopPages(d.id)?.let { ps ->
+                    storage.savePages(ps.map { p -> p.filter { it.startsWith(FOLDER_PREFIX) || it in keys } }, "pages_${d.id}")
+                }
+            }
             folders = folders.mapValues { (_, f) -> f.copy(apps = f.apps.filter { it in keys }) }
             dissolveSmallFolders()
         }
@@ -318,33 +337,135 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         savePages()
     }
 
-    fun isOnHome(key: String) = pages.any { key in it } || key in dock || folders.values.any { key in it.apps }
+    /** Папки, которые лежат на текущем рабочем столе. */
+    private fun foldersHere(): List<Folder> =
+        (pages.flatten() + dock).filter { it.startsWith(FOLDER_PREFIX) }.mapNotNull { folders[it] }
 
-    fun setCapacity(first: Int, other: Int) {
-        if (first == capFirst && other == capOther) return
-        capFirst = first
-        capOther = other
+    fun isOnHome(key: String) = pages.any { key in it } || key in dock || foldersHere().any { key in it.apps }
+
+    fun isBigFolder(id: String) = id.startsWith(FOLDER_PREFIX) && folders[id]?.big == true
+
+    /** Сколько первых элементов списка помещается на экран с таким числом рядов. */
+    fun fitCount(items: List<String>, rows: Int, cols: Int = gridCols): Int =
+        com.vse.launcher.util.GridPlacer.place(items, rows, cols) { isBigFolder(it) }.second
+
+    fun setGrid(first: Int, other: Int, cols: Int) {
+        if (first == rowsFirst && other == rowsOther && cols == gridCols) return
+        rowsFirst = first
+        rowsOther = other
+        gridCols = cols
         normalize()
         savePages()
     }
 
     /** Если экран переполнен — лишние иконки переезжают на следующий. */
     private fun normalize() {
-        if (capFirst <= 0 || capOther <= 0) return
+        if (rowsFirst <= 0 || rowsOther <= 0 || gridCols <= 0) return
         val res = mutableListOf<List<String>>()
         var carry = emptyList<String>()
         pages.forEachIndexed { i, p ->
-            val cap = if (i == 0) capFirst else capOther
             val all = carry + p
-            res += all.take(cap)
-            carry = all.drop(cap)
+            val n = fitCount(all, if (i == 0) rowsFirst else rowsOther).coerceAtLeast(if (all.isEmpty()) 0 else 1)
+            res += all.take(n)
+            carry = all.drop(n)
         }
         while (carry.isNotEmpty()) {
-            res += carry.take(capOther)
-            carry = carry.drop(capOther)
+            val n = fitCount(carry, rowsOther).coerceAtLeast(1)
+            res += carry.take(n)
+            carry = carry.drop(n)
         }
         if (res.isEmpty()) res += emptyList<String>()
         if (res != pages) pages = res
+    }
+
+    fun toggleFolderBig(id: String) {
+        val f = folders[id] ?: return
+        folders = folders + (id to f.copy(big = !f.big))
+        normalize()
+        savePages()
+    }
+
+    // ---------- Рабочие столы ----------
+
+    fun currentDesktop(): Desktop = desktops.firstOrNull { it.id == activeDesktop } ?: desktops.first()
+
+    fun desktopPages(id: String): List<List<String>> =
+        if (id == activeDesktop) pages else loadDesktopPages(id) ?: emptyList()
+
+    private fun saveDesktops() = storage.saveDesktops(desktops)
+
+    fun switchDesktop(id: String) {
+        if (id == activeDesktop || desktops.none { it.id == id }) return
+        if (editMode) exitEditMode()
+        savePages()
+        activeDesktop = id
+        storage.putString("activeDesktop", id)
+        pages = loadDesktopPages(id)?.ifEmpty { null } ?: listOf(emptyList())
+        normalize()
+        savePages()
+        desktopSwitched = System.currentTimeMillis()
+    }
+
+    fun addDesktop(): String {
+        val id = "d" + System.currentTimeMillis()
+        val n = desktops.size + 1
+        // У нового стола сразу свои обои, чтобы было видно, что это другой стол
+        val wp = "grad:" + ((n - 1) % WALLPAPER_PRESETS.size)
+        desktops = desktops + Desktop(id, "Рабочий стол $n", wp)
+        saveDesktops()
+        storage.savePages(listOf(emptyList()), "pages_$id")
+        switchDesktop(id)
+        return id
+    }
+
+    fun renameDesktop(id: String, name: String) {
+        desktops = desktops.map { if (it.id == id) it.copy(name = name.ifBlank { it.name }) else it }
+        saveDesktops()
+    }
+
+    fun deleteDesktop(id: String) {
+        if (desktops.size <= 1) return
+        val d = desktops.firstOrNull { it.id == id } ?: return
+        if (id == activeDesktop) switchDesktop(desktops.first { it.id != id }.id)
+        // Папки удаляемого стола больше не нужны
+        val gone = (loadDesktopPages(id) ?: emptyList()).flatten().filter { it.startsWith(FOLDER_PREFIX) }.toSet()
+        folders = folders - gone
+        storage.saveFolders(folders)
+        deleteWallpaperFile(d.wallpaper)
+        desktops = desktops.filter { it.id != id }
+        storage.remove("pages_$id")
+        saveDesktops()
+    }
+
+    fun setDesktopWallpaper(id: String, wallpaper: String) {
+        val old = desktops.firstOrNull { it.id == id }?.wallpaper
+        desktops = desktops.map { if (it.id == id) it.copy(wallpaper = wallpaper) else it }
+        saveDesktops()
+        if (old != null && old != wallpaper) deleteWallpaperFile(old)
+    }
+
+    private fun deleteWallpaperFile(wp: String) {
+        if (wp.startsWith("file:")) runCatching { java.io.File(wp.removePrefix("file:")).delete() }
+    }
+
+    /** Картинка из галереи → обои для рабочего стола (уменьшаем до размера экрана). */
+    suspend fun importWallpaper(id: String, uri: android.net.Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val dm = ctx.resources.displayMetrics
+            val target = maxOf(dm.widthPixels, dm.heightPixels)
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= target) sample *= 2
+            val bmp = ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            } ?: return@runCatching false
+            val dir = java.io.File(ctx.filesDir, "wallpapers").apply { mkdirs() }
+            val file = java.io.File(dir, "${id}_${System.currentTimeMillis()}.jpg")
+            file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+            withContext(Dispatchers.Main) { setDesktopWallpaper(id, "file:" + file.absolutePath) }
+            true
+        }.getOrDefault(false)
     }
 
     private fun removeEverywhere(id: String) {
@@ -504,7 +625,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun dissolveSmallFolders() {
-        val small = folders.values.filter { it.apps.size <= 1 }
+        val small = foldersHere().filter { it.apps.size <= 1 }
         if (small.isEmpty()) return
         small.forEach { f ->
             val repl = f.apps.firstOrNull()
@@ -517,15 +638,19 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     /** Убрать с экрана «Домой» (приложение останется в библиотеке). */
     fun removeFromHome(id: String) {
         if (id.startsWith(FOLDER_PREFIX)) folders = folders - id
+        val here = foldersHere().map { it.id }.toSet()
         removeEverywhere(id)
-        folders = folders.mapValues { (_, f) -> f.copy(apps = f.apps - id) }
+        folders = folders.mapValues { (fid, f) -> if (fid in here) f.copy(apps = f.apps - id) else f }
         dissolveSmallFolders()
         savePages()
     }
 
     fun addToHome(key: String) {
         if (isOnHome(key)) return
-        val idx = pages.indices.firstOrNull { i -> pages[i].size < (if (i == 0) capFirst else capOther).coerceAtLeast(1) }
+        val idx = pages.indices.firstOrNull { i ->
+            val rows = if (i == 0) rowsFirst else rowsOther
+            rows <= 0 || fitCount(pages[i] + key, rows) == pages[i].size + 1
+        }
         pages = if (idx != null) pages.mapIndexed { i, p -> if (i == idx) p + key else p } else pages + listOf(listOf(key))
         normalize()
         savePages()

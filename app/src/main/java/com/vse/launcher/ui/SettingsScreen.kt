@@ -42,6 +42,8 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
     var themeDialog by remember { mutableStateOf(false) }
     var engineDialog by remember { mutableStateOf(false) }
     var shapeDialog by remember { mutableStateOf(false) }
+    var deskView by remember { mutableStateOf(false) }
+    var deskWallpaper by remember { mutableStateOf(false) }
     var swipeDialog by remember { mutableStateOf(false) }
 
     ScreenScaffold("Настройки лаунчера", onBack) {
@@ -86,6 +88,8 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
 
             SectionTitle("Рабочий стол")
             ClickRow(Icons.Default.Edit, "Изменить экран «Домой»", "Перетаскивание иконок, папки, новые экраны") { vm.editMode = true; onBack() }
+            ClickRow(Icons.Default.DesktopWindows, "Рабочие столы", "${vm.desktops.size} · сейчас: ${vm.currentDesktop().name}") { deskView = true }
+            ClickRow(Icons.Default.Wallpaper, "Обои этого рабочего стола", null) { deskWallpaper = true }
             ClickRow(Icons.Default.LocationCity, "Город для погоды", s.weatherCity) { cityDialog = true }
             SwitchRow(Icons.Default.WavingHand, "Приветствие на экране «Сегодня»", null, s.showGreeting) { v -> vm.updateSettings { it.copy(showGreeting = v) } }
             SwitchRow(Icons.Default.Widgets, "Инструменты на экране «Сегодня»", null, s.showTools) { v -> vm.updateSettings { it.copy(showTools = v) } }
@@ -124,6 +128,13 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
             vm.updateSettings { it.copy(searchEngine = i) }
         }
     }
+    if (deskView) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { deskView = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) { TaskView(vm, remember(vm.allApps) { vm.appMap() }, onClose = { deskView = false }) }
+    }
+    if (deskWallpaper) WallpaperSheet(vm, vm.currentDesktop()) { deskWallpaper = false }
     if (shapeDialog) {
         ChoiceDialog("Форма иконок", ICON_SHAPES, s.iconShape, { shapeDialog = false }) { i -> vm.updateSettings { it.copy(iconShape = i) } }
     }

@@ -18,7 +18,27 @@ data class AppInfo(
 )
 
 /** Папка на рабочем столе. */
-data class Folder(val id: String, val name: String, val apps: List<String>)
+data class Folder(val id: String, val name: String, val apps: List<String>, val big: Boolean = false)
+
+/**
+ * Рабочий стол (как виртуальные рабочие столы в Windows): свои экраны с иконками и свои обои.
+ * wallpaper: "system" — системные обои, "grad:N" — градиент из набора, "file:/путь" — картинка из галереи.
+ */
+data class Desktop(val id: String, val name: String, val wallpaper: String = "system")
+
+/** Готовые обои-градиенты. */
+val WALLPAPER_PRESETS: List<Pair<String, List<Long>>> = listOf(
+    "Синий" to listOf(0xFF001A4D, 0xFF0063B1, 0xFF4CC2FF),
+    "Закат" to listOf(0xFF2B1055, 0xFFD53369, 0xFFDAAE51),
+    "Аврора" to listOf(0xFF0F2027, 0xFF203A43, 0xFF2C9C7A),
+    "Океан" to listOf(0xFF1A2980, 0xFF26D0CE),
+    "Фиолет" to listOf(0xFF2F0743, 0xFF41295A, 0xFF8E54E9),
+    "Персик" to listOf(0xFFFF6A88, 0xFFFF9A8B, 0xFFFFC3A0),
+    "Лес" to listOf(0xFF134E5E, 0xFF71B280),
+    "Ночь" to listOf(0xFF000000, 0xFF232526, 0xFF414345),
+    "Степь" to listOf(0xFF00AFCA, 0xFFFEC50C),
+    "Лаванда" to listOf(0xFF6A82FB, 0xFFFC5C7D),
+)
 
 const val FOLDER_PREFIX = "folder:"
 const val DOCK_MAX = 4

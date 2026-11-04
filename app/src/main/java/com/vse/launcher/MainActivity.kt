@@ -77,7 +77,8 @@ fun LauncherRoot(
 ) {
     BackHandler(enabled = top != null) { pop() }
     Box(Modifier.fillMaxSize()) {
-        HomeScreen(vm, open = push)
+        // Свой рабочий стол — свой экран (переключение как в Windows)
+        key(vm.activeDesktop) { HomeScreen(vm, open = push) }
         AnimatedContent(
             targetState = top,
             transitionSpec = {

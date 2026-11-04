@@ -157,18 +157,37 @@ class Storage(context: Context) {
         prefs.edit().putString("todos", a.toString()).apply()
     }
 
-    fun loadPages(): List<List<String>>? {
-        val s = prefs.getString("pages", null) ?: return null
+    fun loadDesktops(): List<Desktop> {
+        val s = prefs.getString("desktops", null) ?: return listOf(Desktop("main", "Рабочий стол 1"))
+        return runCatching {
+            val a = JSONArray(s)
+            List(a.length()) {
+                val o = a.getJSONObject(it)
+                Desktop(o.getString("id"), o.optString("name"), o.optString("wallpaper", "system"))
+            }
+        }.getOrNull()?.ifEmpty { null } ?: listOf(Desktop("main", "Рабочий стол 1"))
+    }
+
+    fun saveDesktops(list: List<Desktop>) {
+        val a = JSONArray()
+        list.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("wallpaper", it.wallpaper)) }
+        prefs.edit().putString("desktops", a.toString()).apply()
+    }
+
+    fun remove(key: String) = prefs.edit().remove(key).apply()
+
+    fun loadPages(key: String = "pages"): List<List<String>>? {
+        val s = prefs.getString(key, null) ?: return null
         return runCatching {
             val a = JSONArray(s)
             List(a.length()) { i -> val p = a.getJSONArray(i); List(p.length()) { p.getString(it) } }
         }.getOrNull()
     }
 
-    fun savePages(pages: List<List<String>>) {
+    fun savePages(pages: List<List<String>>, key: String = "pages") {
         val a = JSONArray()
         pages.forEach { a.put(JSONArray(it)) }
-        prefs.edit().putString("pages", a.toString()).apply()
+        prefs.edit().putString(key, a.toString()).apply()
     }
 
     fun loadFolders(): Map<String, Folder> {
@@ -178,14 +197,14 @@ class Storage(context: Context) {
             List(a.length()) {
                 val o = a.getJSONObject(it)
                 val apps = o.getJSONArray("apps")
-                Folder(o.getString("id"), o.optString("name"), List(apps.length()) { i -> apps.getString(i) })
+                Folder(o.getString("id"), o.optString("name"), List(apps.length()) { i -> apps.getString(i) }, o.optBoolean("big"))
             }.associateBy { it.id }
         }.getOrDefault(emptyMap())
     }
 
     fun saveFolders(folders: Map<String, Folder>) {
         val a = JSONArray()
-        folders.values.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("apps", JSONArray(it.apps))) }
+        folders.values.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("apps", JSONArray(it.apps)).put("big", it.big)) }
         prefs.edit().putString("folders", a.toString()).apply()
     }
 

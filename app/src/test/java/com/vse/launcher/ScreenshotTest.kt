@@ -82,5 +82,12 @@ class ScreenshotTest {
     }
 
     @Test fun home() = shoot("home")
-    @Test fun editMode() = shoot("edit") { _, vm -> vm.editMode = true }
+    @Test fun bigFolder() = shoot("bigfolder") { _, vm ->
+        vm.folders.values.filter { it.apps.size >= 4 }.take(2).forEach { vm.toggleFolderBig(it.id) }
+    }
+    @Test fun secondDesktop() = shoot("desktop2") { _, vm ->
+        vm.addDesktop()
+        vm.addToHome("com.spotify.music/cls")
+        vm.addToHome("org.telegram.messenger/cls")
+    }
 }

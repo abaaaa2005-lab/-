@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -133,7 +134,12 @@ private data class Slot(val page: Int, val index: Int)
 /** Координаты элементов рабочего стола — нужны, чтобы понимать, куда нажали и куда тащат. */
 private class HitMap {
     val cells = HashMap<Slot, Rect>()
-    val icons = HashMap<Slot, Rect>()
+    /** Какой элемент (индекс в списке экрана) занимает ячейку. */
+    val owner = HashMap<Slot, Int>()
+    /** Где на экране иконка каждого элемента. */
+    val iconById = HashMap<String, Rect>()
+    /** Приложения внутри больших папок: id папки → (приложение, его иконка). */
+    val inner = HashMap<String, List<Pair<String, Rect>>>()
     var dock = Rect.Zero
     var clock = Rect.Zero
     var dateLine = Rect.Zero
@@ -212,7 +218,10 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
     fun currentAppPage() = pager.currentPage - 1
 
     fun slotItem(slot: Slot): String? =
-        if (slot.page == -1) vm.dock.getOrNull(slot.index) else vm.pages.getOrNull(slot.page)?.getOrNull(slot.index)
+        if (slot.page == -1) vm.dock.getOrNull(slot.index)
+        else hits.owner[slot]?.let { vm.pages.getOrNull(slot.page)?.getOrNull(it) }
+
+    fun iconRect(id: String): Rect? = hits.iconById[id]?.let { hits.local(it) }
 
     fun hitSlot(pos: Offset): Slot? {
         if (hits.local(hits.dock).contains(pos)) {
@@ -235,7 +244,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         }
         val slot = hitSlot(pos) ?: return
         val target = slotItem(slot)
-        val iconRect = hits.icons[slot]?.let { hits.local(it) }
+        val iconRect = target?.let { iconRect(it) }
         if (target != null && target != id && iconRect != null && !id.startsWith(FOLDER_PREFIX)) {
             val inner = Rect(
                 iconRect.left + iconRect.width * 0.22f, iconRect.top + iconRect.height * 0.22f,
@@ -254,7 +263,8 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         } else {
             val list = vm.pages.getOrNull(slot.page) ?: emptyList()
             val same = id in list
-            vm.moveItem(id, LauncherViewModel.Target.Page(slot.page, slot.index.coerceAtMost(if (same) list.size - 1 else list.size)))
+            val index = hits.owner[slot] ?: list.size
+            vm.moveItem(id, LauncherViewModel.Target.Page(slot.page, index.coerceAtMost(if (same) list.size - 1 else list.size)))
         }
     }
 
@@ -291,14 +301,19 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         }
                     }
                     vm.editMode -> {
-                        val icon = hits.icons[slot]?.let { hits.local(it) }
+                        val icon = iconRect(id)
                         val badge = with(density) { 26.dp.toPx() }
                         val onBadge = icon != null && pos.x < icon.left + badge && pos.y < icon.top + badge
                         if (onBadge) {
                             if (id.startsWith(FOLDER_PREFIX)) confirmFolderDelete = id else vm.removeFromHome(id)
                         } else if (id.startsWith(FOLDER_PREFIX)) openFolder = id
                     }
-                    id.startsWith(FOLDER_PREFIX) -> openFolder = id
+                    id.startsWith(FOLDER_PREFIX) -> {
+                        // В большой папке приложения запускаются прямо с рабочего стола
+                        val hit = hits.inner[id]?.firstOrNull { hits.local(it.second).contains(pos) }?.first
+                        val app = hit?.let { apps[it] }
+                        if (app != null) vm.launch(app) else openFolder = id
+                    }
                     else -> apps[id]?.let { vm.launch(it) }
                 }
             },
@@ -335,8 +350,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                 } else {
                     val pid = pressedId
                     if (pid != null) {
-                        val slot = hitSlot(pressStart)
-                        val rect = slot?.let { hits.icons[it] }?.let { hits.local(it) }
+                        val rect = iconRect(pid)
                         if (rect != null) menuFor = pid to rect
                     }
                 }
@@ -357,9 +371,23 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         )
     )
 
+    val desktop = vm.currentDesktop()
+    var taskView by remember { mutableStateOf(false) }
+    // Плавное появление при переключении рабочего стола
+    val appear = remember { Animatable(if (vm.desktopSwitched > 0) 0f else 1f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(320)) }
+    var showDesktopName by remember { mutableStateOf(vm.desktopSwitched > 0 && System.currentTimeMillis() - vm.desktopSwitched < 2000) }
+    LaunchedEffect(showDesktopName) { if (showDesktopName) { delay(1400); showDesktopName = false } }
+
+    DesktopWallpaper(desktop.wallpaper, Modifier.fillMaxSize())
     Box(
         Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                alpha = appear.value
+                val sc = 0.94f + 0.06f * appear.value
+                scaleX = sc; scaleY = sc
+            }
             .background(Color.Black.copy(alpha = s.wallpaperDim))
             .onGloballyPositioned { hits.origin = it.boundsInRoot().topLeft }
             .pointerInput(Unit) {
@@ -418,10 +446,13 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         scope.launch { pager.animateScrollToPage(vm.pages.size) }
                     },
                     onAutoFolders = { vm.autoFolders() },
+                    onDesktops = { taskView = true },
                     onWallpaper = { SystemActions.pickWallpaper(ctx) },
                     onSettings = { open(Screen.Settings) },
                     onDone = { vm.exitEditMode() },
                 )
+            } else if (vm.desktops.size > 1) {
+                DesktopPill(desktop.name) { taskView = true }
             } else {
                 Spacer(Modifier.height(8.dp))
             }
@@ -432,7 +463,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                 val rowsOther = floor(gridH / cellH).toInt().coerceAtLeast(1)
                 val rowsFirst = (if (s.showClock) floor((gridH - clockH) / cellH).toInt() else rowsOther).coerceAtLeast(1)
                 LaunchedEffect(rowsFirst, rowsOther, s.columns) {
-                    vm.setCapacity(rowsFirst * s.columns, rowsOther * s.columns)
+                    vm.setGrid(rowsFirst, rowsOther, s.columns)
                 }
                 HorizontalPager(
                     state = pager,
@@ -471,8 +502,23 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         }
                     }
                 }
-                // Пустой экран в режиме редактирования — можно удалить
+                // Пустой рабочий стол — подсказка
                 val cur = pager.currentPage - 1
+                if (!vm.editMode && cur == 0 && vm.pages.all { it.isEmpty() } && !vm.loading) {
+                    Column(
+                        Modifier.align(Alignment.Center).padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("«${desktop.name}» пока пуст", style = MaterialTheme.typography.titleMedium.onWallpaper())
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Свайп вверх → удерживайте приложение → «Добавить на экран «Домой»»",
+                            style = MaterialTheme.typography.bodyMedium.onWallpaper(),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                // Пустой экран в режиме редактирования — можно удалить
                 if (vm.editMode && cur >= 0 && vm.pages.getOrNull(cur)?.isEmpty() == true && vm.pages.size > 1 && dragId == null) {
                     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Пустой экран", style = MaterialTheme.typography.titleMedium.onWallpaper())
@@ -496,7 +542,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         if (dragging != null) {
             val half = with(density) { (iconSize / 2).toPx() }
             Box(Modifier.offset { IntOffset((dragPos.x - half).roundToInt(), (dragPos.y - half).roundToInt()) }.scale(1.12f)) {
-                HomeIcon(dragging, apps, vm.folders, iconSize, showLabel = false)
+                HomeIcon(dragging, apps, vm.folders, iconSize, showLabel = false, forceSmall = true)
             }
         }
 
@@ -510,6 +556,12 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                 if (id.startsWith(FOLDER_PREFIX)) {
                     DropdownMenu(expanded = true, onDismissRequest = { menuFor = null }, shape = RoundedCornerShape(16.dp)) {
                         DropdownMenuItem(text = { Text("Открыть папку") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuFor = null; openFolder = id })
+                        val big = vm.folders[id]?.big == true
+                        DropdownMenuItem(
+                            text = { Text(if (big) "Сделать маленькой" else "Сделать большой (2×2)") },
+                            leadingIcon = { Icon(if (big) Icons.Default.ZoomInMap else Icons.Default.ZoomOutMap, null) },
+                            onClick = { menuFor = null; vm.toggleFolderBig(id) },
+                        )
                         DropdownMenuItem(text = { Text("Изменить экран «Домой»") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menuFor = null; vm.editMode = true })
                         DropdownMenuItem(text = { Text("Удалить папку") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menuFor = null; confirmFolderDelete = id })
                     }
@@ -534,7 +586,28 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
             if (openFolder != null) lastFolder = openFolder
             lastFolder?.let { fid -> FolderWindow(vm, fid, onClose = { openFolder = null }) }
         }
+
+        // Название стола после переключения
+        AnimatedVisibility(
+            visible = showDesktopName,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            Text(
+                desktop.name,
+                style = MaterialTheme.typography.headlineSmall.copy(color = Color.White, fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.5f))
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+            )
+        }
+
+        // «Представление задач» — все рабочие столы, как в Windows
+        AnimatedVisibility(visible = taskView, enter = fadeIn() + scaleIn(initialScale = 1.06f), exit = fadeOut() + scaleOut(targetScale = 1.06f)) {
+            TaskView(vm, apps, onClose = { taskView = false })
+        }
     }
+    BackHandler(enabled = taskView) { taskView = false }
 
     renaming?.let { app -> RenameDialog(app, vm) { renaming = null } }
 
@@ -576,33 +649,44 @@ private fun AppGrid(
     modifier: Modifier,
 ) {
     val s = vm.settings
-    Column(modifier.fillMaxWidth()) {
-        for (r in 0 until rows) {
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                for (c in 0 until columns) {
-                    val idx = r * columns + c
-                    val slot = Slot(page, idx)
-                    val id = items.getOrNull(idx)
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .onGloballyPositioned { hits.cells[slot] = it.boundsInRoot() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (id != null) {
-                            HomeIcon(
-                                id, apps, vm.folders, s.iconSizeDp.dp, s.showLabels,
-                                jiggle = vm.editMode, jigglePhase = idx,
-                                hidden = id == dragId,
-                                highlighted = id == mergeTarget,
-                                onIconPositioned = { hits.icons[slot] = it },
-                            )
-                        } else {
-                            hits.icons.remove(slot)
-                        }
-                    }
-                }
+    val placed = remember(items, rows, columns, vm.folders) {
+        com.vse.launcher.util.GridPlacer.place(items, rows, columns) { vm.isBigFolder(it) }.first
+    }
+    // Запоминаем, какой элемент в какой ячейке — для перетаскивания и нажатий
+    SideEffect {
+        hits.owner.keys.removeAll { it.page == page }
+        placed.forEach { p ->
+            for (dr in 0 until p.span) for (dc in 0 until p.span) {
+                hits.owner[Slot(page, (p.row + dr) * columns + p.col + dc)] = p.itemIndex
+            }
+        }
+    }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val cw = maxWidth / columns
+        val rh = maxHeight / rows
+        // Ячейки (в том числе пустые) — чтобы знать, куда бросают иконку
+        for (r in 0 until rows) for (c in 0 until columns) {
+            val slot = Slot(page, r * columns + c)
+            Box(
+                Modifier.offset(cw * c, rh * r).size(cw, rh)
+                    .onGloballyPositioned { hits.cells[slot] = it.boundsInRoot() },
+            )
+        }
+        placed.forEach { p ->
+            val id = items[p.itemIndex]
+            Box(
+                Modifier.offset(cw * p.col, rh * p.row).size(cw * p.span, rh * p.span),
+                contentAlignment = Alignment.Center,
+            ) {
+                HomeIcon(
+                    id, apps, vm.folders, s.iconSizeDp.dp, s.showLabels,
+                    jiggle = vm.editMode, jigglePhase = p.itemIndex,
+                    hidden = id == dragId,
+                    highlighted = id == mergeTarget,
+                    onIconPositioned = { hits.iconById[id] = it },
+                    onInner = { hits.inner[id] = it },
+                    bigArea = if (p.span == 2) Pair(cw * 2, rh * 2) else null,
+                )
             }
         }
     }
@@ -621,22 +705,32 @@ private fun HomeIcon(
     hidden: Boolean = false,
     highlighted: Boolean = false,
     onIconPositioned: (Rect) -> Unit = {},
+    onInner: (List<Pair<String, Rect>>) -> Unit = {},
+    bigArea: Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp>? = null,
+    forceSmall: Boolean = false,
 ) {
     val folder = if (id.startsWith(FOLDER_PREFIX)) folders[id] else null
     val app = if (folder == null) apps[id] else null
     if (folder == null && app == null) return
     val label = folder?.name ?: app!!.label
+    val big = folder != null && folder.big && bigArea != null && !forceSmall
 
     val rotation = if (jiggle) {
         val t = rememberInfiniteTransition(label = "jiggle")
         val a by t.animateFloat(
-            initialValue = -1.6f, targetValue = 1.6f,
+            initialValue = if (big) -0.8f else -1.6f, targetValue = if (big) 0.8f else 1.6f,
             animationSpec = infiniteRepeatable(tween(130 + (jigglePhase % 3) * 15, easing = LinearEasing), RepeatMode.Reverse),
             label = "rot",
         )
         if (jigglePhase % 2 == 0) a else -a
     } else 0f
-    val scale by animateFloatAsState(if (highlighted) 1.18f else 1f, label = "hl")
+    val scale by animateFloatAsState(if (highlighted) (if (big) 1.06f else 1.18f) else 1f, label = "hl")
+
+    // Размер плитки: обычная иконка или большая папка 2×2
+    val tile = if (big) {
+        val (w, h) = bigArea!!
+        minOf(w - 20.dp, h - (if (showLabel) 24.dp else 6.dp) - 12.dp)
+    } else iconSize
 
     Column(
         Modifier.alpha(if (hidden) 0f else 1f).rotate(rotation),
@@ -644,14 +738,17 @@ private fun HomeIcon(
     ) {
         Box(
             Modifier
-                .size(iconSize)
+                .size(tile)
                 .scale(scale)
                 .onGloballyPositioned { onIconPositioned(it.boundsInRoot()) },
         ) {
-            if (folder != null) FolderIcon(folder, apps, iconSize)
-            else if (app!!.icon != null) Image(app.icon!!, app.label, Modifier.fillMaxSize())
-            else Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22)).background(Glass), contentAlignment = Alignment.Center) {
-                Text(app.label.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+            when {
+                big -> BigFolderTile(folder!!, apps, tile, onInner)
+                folder != null -> FolderIcon(folder, apps, tile)
+                app!!.icon != null -> Image(app.icon!!, app.label, Modifier.fillMaxSize())
+                else -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22)).background(Glass), contentAlignment = Alignment.Center) {
+                    Text(app.label.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+                }
             }
             if (jiggle) {
                 Box(
@@ -672,7 +769,7 @@ private fun HomeIcon(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.widthIn(max = iconSize + 22.dp),
+                modifier = Modifier.widthIn(max = tile + 22.dp),
             )
         }
     }
@@ -690,6 +787,65 @@ private fun FolderIcon(folder: Folder, apps: Map<String, AppInfo>, size: android
                         val a = apps[k]
                         if (a?.icon != null) Image(a.icon, null, Modifier.size(size / 4.6f))
                         else Spacer(Modifier.size(size / 4.6f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Большая папка 2×2: первые три приложения крупно (открываются сразу), в четвёртом углу — остальные. */
+@Composable
+private fun BigFolderTile(
+    folder: Folder,
+    apps: Map<String, AppInfo>,
+    size: androidx.compose.ui.unit.Dp,
+    onInner: (List<Pair<String, Rect>>) -> Unit,
+) {
+    val pad = size * 0.09f
+    val gap = size * 0.07f
+    val cell = (size - pad * 2 - gap) / 2
+    val many = folder.apps.size > 4
+    val shown = if (many) folder.apps.take(3) else folder.apps.take(4)
+    val rects = remember(folder.apps) { HashMap<String, Rect>() }
+    Box(Modifier.size(size).clip(RoundedCornerShape(16)).background(Glass).padding(pad)) {
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            for (r in 0 until 2) {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    for (c in 0 until 2) {
+                        val i = r * 2 + c
+                        val k = shown.getOrNull(i)
+                        when {
+                            k != null -> {
+                                val a = apps[k]
+                                Box(
+                                    Modifier.size(cell).onGloballyPositioned { coords ->
+                                        rects[k] = coords.boundsInRoot()
+                                        onInner(shown.mapNotNull { key -> rects[key]?.let { key to it } })
+                                    },
+                                ) {
+                                    if (a?.icon != null) Image(a.icon, a.label, Modifier.fillMaxSize())
+                                }
+                            }
+                            many && i == 3 -> {
+                                // Остальные приложения мелко — нажатие открывает папку
+                                Box(Modifier.size(cell).padding(cell * 0.06f)) {
+                                    val mini = (cell * 0.88f - cell * 0.08f) / 2
+                                    Column(verticalArrangement = Arrangement.spacedBy(cell * 0.08f)) {
+                                        folder.apps.drop(3).take(4).chunked(2).forEach { row ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(cell * 0.08f)) {
+                                                row.forEach { kk ->
+                                                    val a = apps[kk]
+                                                    if (a?.icon != null) Image(a.icon, null, Modifier.size(mini))
+                                                    else Spacer(Modifier.size(mini))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else -> Spacer(Modifier.size(cell))
+                        }
                     }
                 }
             }
@@ -858,7 +1014,7 @@ private fun Dock(vm: LauncherViewModel, apps: Map<String, AppInfo>, hits: HitMap
                     id, apps, vm.folders, s.iconSizeDp.dp, showLabel = false,
                     jiggle = vm.editMode, jigglePhase = i + 1,
                     hidden = id == dragId, highlighted = id == mergeTarget,
-                    onIconPositioned = { hits.icons[slot] = it },
+                    onIconPositioned = { hits.iconById[id] = it },
                 )
             }
         }
@@ -894,14 +1050,15 @@ private fun PageDots(count: Int, current: Int) {
 }
 
 @Composable
-private fun EditBar(onAddPage: () -> Unit, onAutoFolders: () -> Unit, onWallpaper: () -> Unit, onSettings: () -> Unit, onDone: () -> Unit) {
+private fun EditBar(onAddPage: () -> Unit, onAutoFolders: () -> Unit, onDesktops: () -> Unit, onWallpaper: () -> Unit, onSettings: () -> Unit, onDone: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        GlassButton(Icons.Default.Add, "Экран", onAddPage)
+        GlassButton(Icons.Default.Add, null, onAddPage)
         GlassButton(Icons.Default.CreateNewFolder, "Папки", onAutoFolders)
+        GlassButton(Icons.Default.DesktopWindows, "Столы", onDesktops)
         GlassButton(Icons.Default.Wallpaper, null, onWallpaper)
         GlassButton(Icons.Default.Settings, null, onSettings)
         Spacer(Modifier.weight(1f))
@@ -951,7 +1108,7 @@ private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () ->
             },
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(14.dp)) {
             BasicTextField(
                 name, { name = it; vm.renameFolder(folderId, it) },
                 singleLine = true,
@@ -962,10 +1119,13 @@ private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () ->
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(36.dp))
+                    .heightIn(max = 520.dp)
+                    .clip(RoundedCornerShape(40.dp))
                     .background(Color.White.copy(alpha = 0.22f))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                    .padding(16.dp),
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 22.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 folder.apps.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {
@@ -973,7 +1133,7 @@ private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () ->
                             val app = apps[k]
                             if (app != null) {
                                 AppIcon(
-                                    app, vm, s.iconSizeDp.dp, true, onWallpaper = true,
+                                    app, vm, s.iconSizeDp.dp + 10.dp, true, onWallpaper = true,
                                     modifier = Modifier.weight(1f),
                                     folderId = folderId,
                                     onLaunched = onClose,
@@ -984,10 +1144,20 @@ private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () ->
                     }
                 }
             }
+            Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.22f))
+                    .clickable { vm.toggleFolderBig(folderId) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (folder.big) Icons.Default.ZoomInMap else Icons.Default.ZoomOutMap, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (folder.big) "Сделать маленькой" else "Большая папка на рабочем столе (2×2)", color = Color.White)
+            }
             Text(
                 "Удерживайте иконку, чтобы вынуть её из папки",
                 style = MaterialTheme.typography.bodySmall.onWallpaper(),
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier.padding(top = 10.dp),
             )
         }
     }
