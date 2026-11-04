@@ -171,7 +171,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     private fun withNames(list: List<AppInfo>) = list.map { a -> renamed[a.key]?.let { a.copy(label = it) } ?: a }
 
     fun visibleApps(): List<AppInfo> {
-        val list = withNames(allApps).filter { it.key !in hidden }
+        val list = withNames(allApps).filter { it.key !in hidden && !isSecretOnly(it.key) }
         return when (settings.drawerSort) {
             DrawerSort.ALPHA -> list.sortedBy { it.label.lowercase() }
             DrawerSort.USAGE -> list.sortedWith(compareByDescending<AppInfo> { launchCounts[it.key] ?: 0 }.thenBy { it.label.lowercase() })
@@ -187,14 +187,14 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun topApps(n: Int): List<AppInfo> = withNames(allApps)
-        .filter { it.key !in hidden && (launchCounts[it.key] ?: 0) > 0 }
+        .filter { it.key !in hidden && !isSecretOnly(it.key) && (launchCounts[it.key] ?: 0) > 0 }
         .sortedByDescending { launchCounts[it.key] ?: 0 }
         .take(n)
 
     fun searchApps(q: String): List<AppInfo> {
         val query = q.trim().lowercase()
         if (query.isEmpty()) return emptyList()
-        return withNames(allApps).filter { it.key !in hidden }.mapNotNull { a ->
+        return withNames(allApps).filter { it.key !in hidden && !isSecretOnly(it.key) }.mapNotNull { a ->
             val l = a.label.lowercase()
             val score = when {
                 l == query -> 0
@@ -216,9 +216,15 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         return q.length >= 2 && i == q.length
     }
 
-    fun launch(app: AppInfo, bounds: Rect? = null) {
+    /**
+     * Запуск приложения. Если известно, где иконка, — приложение «вырастает» из неё, как на iPhone.
+     */
+    fun launch(app: AppInfo, bounds: Rect? = null, view: android.view.View? = null) {
         try {
-            launcherApps.startMainActivity(ComponentName(app.packageName, app.className), app.user, bounds, null)
+            val opts = if (bounds != null && view != null) {
+                android.app.ActivityOptions.makeScaleUpAnimation(view, bounds.left, bounds.top, bounds.width(), bounds.height()).toBundle()
+            } else null
+            launcherApps.startMainActivity(ComponentName(app.packageName, app.className), app.user, bounds, opts)
             val m = launchCounts.toMutableMap()
             m[app.key] = (m[app.key] ?: 0) + 1
             launchCounts = m
@@ -281,6 +287,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     private fun savePages() {
         storage.savePages(pages)
         storage.savePages(pages, "pages_$activeDesktop")
+        refreshSecretApps()
         storage.saveStringList("dock", dock)
         storage.saveFolders(folders)
     }
@@ -385,6 +392,123 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         savePages()
     }
 
+    // ---------- Добавление и перемещение без перетаскивания ----------
+
+    /** Добавить сразу несколько приложений в конец экрана. */
+    fun addManyToPage(keys: List<String>, page: Int) {
+        keys.forEach { k ->
+            if (k !in hidden) {
+                val size = pages.getOrNull(page)?.size ?: 0
+                val here = pages.getOrNull(page)?.contains(k) == true
+                if (!here) moveItem(k, Target.Page(page, size))
+            }
+        }
+    }
+
+    /** Новая папка из выбранных приложений — встаёт на указанный экран. */
+    fun createFolder(keys: List<String>, page: Int, name: String? = null): String? {
+        if (keys.size < 2) { addManyToPage(keys, page); return null }
+        val map = appMap()
+        val id = FOLDER_PREFIX + System.nanoTime()
+        keys.forEach { k ->
+            removeEverywhere(k)
+            folders = folders.mapValues { (fid, f) -> if (f.apps.contains(k) && fid in foldersHere().map { it.id }) f.copy(apps = f.apps - k) else f }
+        }
+        folders = folders + (id to Folder(id, name ?: folderName(keys.mapNotNull { map[it] }), keys))
+        val list = pages.toMutableList()
+        while (list.size <= page) list += emptyList<String>()
+        list[page] = list[page] + id
+        pages = list
+        dissolveSmallFolders()
+        normalize()
+        savePages()
+        return id
+    }
+
+    /** Задать состав папки (через список с галочками). */
+    fun setFolderApps(folderId: String, keys: List<String>) {
+        val f = folders[folderId] ?: return
+        val added = keys.filter { it !in f.apps }
+        added.forEach { k ->
+            removeEverywhere(k)
+            val here = foldersHere().map { it.id }.toSet()
+            folders = folders.mapValues { (fid, ff) -> if (fid != folderId && fid in here) ff.copy(apps = ff.apps - k) else ff }
+        }
+        folders = folders + (folderId to f.copy(apps = f.apps.filter { it in keys } + added))
+        dissolveSmallFolders()
+        normalize()
+        savePages()
+    }
+
+    fun moveToFolder(id: String, folderId: String) {
+        if (id.startsWith(FOLDER_PREFIX) || id == folderId) return
+        val f = folders[folderId] ?: return
+        removeEverywhere(id)
+        folders = folders + (folderId to f.copy(apps = f.apps - id + id))
+        normalize()
+        savePages()
+    }
+
+    fun moveToPage(id: String, page: Int) {
+        val list = pages.toMutableList()
+        while (list.size <= page) list += emptyList<String>()
+        pages = list
+        removeEverywhere(id)
+        pages = pages.mapIndexed { i, p -> if (i == page) p + id else p }
+        normalize()
+        savePages()
+    }
+
+    /** Перенести иконку (или папку) на другой рабочий стол — в конец его последнего экрана. */
+    fun moveToDesktop(id: String, desktopId: String) {
+        if (desktopId == activeDesktop) return
+        removeEverywhere(id)
+        val other = (loadDesktopPages(desktopId) ?: emptyList()).ifEmpty { listOf(emptyList()) }
+        storage.savePages(other.dropLast(1) + listOf(other.last() + id), "pages_$desktopId")
+        normalize()
+        savePages()
+    }
+
+    // ---------- Секретные столы ----------
+
+    /** Секретные столы видны только после ввода PIN; при выключении экрана — снова скрыты. */
+    var secretUnlocked by mutableStateOf(false)
+        private set
+    private var secretOnlyApps by mutableStateOf<Set<String>>(emptySet())
+
+    fun isSecretOnly(key: String) = !secretUnlocked && key in secretOnlyApps
+
+    fun unlockSecret() { secretUnlocked = true }
+
+    fun lockSecret() {
+        secretUnlocked = false
+        if (currentDesktop().secret) {
+            desktops.firstOrNull { !it.secret }?.let { switchDesktop(it.id) }
+        }
+    }
+
+    /** Приложения, которые лежат только на секретных столах, — прячем из меню и поиска. */
+    private fun refreshSecretApps() {
+        fun keysOf(ps: List<List<String>>): Set<String> = ps.flatten().flatMap { id ->
+            if (id.startsWith(FOLDER_PREFIX)) folders[id]?.apps ?: emptyList() else listOf(id)
+        }.toSet()
+        val secret = HashSet<String>()
+        val normal = HashSet<String>(dock)
+        desktops.forEach { d ->
+            val ks = keysOf(desktopPages(d.id))
+            if (d.secret) secret += ks else normal += ks
+        }
+        secretOnlyApps = secret - normal
+    }
+
+    fun setDesktopSecret(id: String, secret: Boolean) {
+        // Хотя бы один обычный стол должен остаться
+        if (secret && desktops.count { !it.secret && it.id != id } == 0) return
+        desktops = desktops.map { if (it.id == id) it.copy(secret = secret) else it }
+        saveDesktops()
+        refreshSecretApps()
+    }
+
     // ---------- Рабочие столы ----------
 
     fun currentDesktop(): Desktop = desktops.firstOrNull { it.id == activeDesktop } ?: desktops.first()
@@ -396,6 +520,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     fun switchDesktop(id: String) {
         if (id == activeDesktop || desktops.none { it.id == id }) return
+        if (desktops.first { it.id == id }.secret && !secretUnlocked) return
         if (editMode) exitEditMode()
         savePages()
         activeDesktop = id
@@ -406,12 +531,12 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         desktopSwitched = System.currentTimeMillis()
     }
 
-    fun addDesktop(): String {
+    fun addDesktop(secret: Boolean = false): String {
         val id = "d" + System.currentTimeMillis()
-        val n = desktops.size + 1
+        val n = desktops.count { it.secret == secret } + 1
         // У нового стола сразу свои обои, чтобы было видно, что это другой стол
-        val wp = "grad:" + ((n - 1) % WALLPAPER_PRESETS.size)
-        desktops = desktops + Desktop(id, "Рабочий стол $n", wp)
+        val wp = if (secret) "grad:7" else "grad:" + ((desktops.size) % WALLPAPER_PRESETS.size)
+        desktops = desktops + Desktop(id, if (secret) "Секретный стол $n" else "Рабочий стол $n", wp, secret)
         saveDesktops()
         storage.savePages(listOf(emptyList()), "pages_$id")
         switchDesktop(id)
@@ -426,7 +551,8 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteDesktop(id: String) {
         if (desktops.size <= 1) return
         val d = desktops.firstOrNull { it.id == id } ?: return
-        if (id == activeDesktop) switchDesktop(desktops.first { it.id != id }.id)
+        if (!d.secret && desktops.count { !it.secret } <= 1) return
+        if (id == activeDesktop) switchDesktop((desktops.firstOrNull { it.id != id && !it.secret } ?: desktops.first { it.id != id }).id)
         // Папки удаляемого стола больше не нужны
         val gone = (loadDesktopPages(id) ?: emptyList()).flatten().filter { it.startsWith(FOLDER_PREFIX) }.toSet()
         folders = folders - gone

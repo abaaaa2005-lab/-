@@ -70,7 +70,7 @@ class ScreenshotTest {
             vm.setAppsForTest(fakeApps())
             setup(act, vm)
         }
-        repeat(20) { ShadowLooper.idleMainLooper(); Thread.sleep(20) }
+        repeat(40) { ShadowLooper.idleMainLooper(25, java.util.concurrent.TimeUnit.MILLISECONDS) }
         scenario.onActivity { act ->
             val root = act.window.decorView
             val bmp = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
@@ -84,6 +84,7 @@ class ScreenshotTest {
     }
 
     @Test fun home() = shoot("home")
+    @Test fun editMode() = shoot("edit") { _, vm -> vm.editMode = true }
     @Test fun bigFolder() = shoot("bigfolder") { _, vm ->
         vm.folders.values.filter { it.apps.size >= 4 }.take(2).forEach { vm.toggleFolderBig(it.id) }
     }

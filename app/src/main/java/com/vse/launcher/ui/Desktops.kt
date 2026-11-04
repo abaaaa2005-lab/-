@@ -65,14 +65,14 @@ fun DesktopWallpaper(wallpaper: String, modifier: Modifier = Modifier, sample: I
 
 /** Плашка с названием стола сверху — нажатие открывает список столов. */
 @Composable
-fun DesktopPill(name: String, onClick: () -> Unit) {
+fun DesktopPill(name: String, secret: Boolean = false, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), horizontalArrangement = Arrangement.Center) {
         Row(
             Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.25f)).clickable(onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Default.DesktopWindows, null, tint = Color.White, modifier = Modifier.size(14.dp))
+            Icon(if (secret) Icons.Default.Lock else Icons.Default.DesktopWindows, null, tint = if (secret) Color(0xFFFFD166) else Color.White, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
             Text(name, color = Color.White, style = MaterialTheme.typography.labelMedium)
             Icon(Icons.Default.ArrowDropDown, null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -87,6 +87,8 @@ fun TaskView(vm: LauncherViewModel, apps: Map<String, AppInfo>, onClose: () -> U
     var renameFor by remember { mutableStateOf<Desktop?>(null) }
     var wallpaperFor by remember { mutableStateOf<Desktop?>(null) }
     var deleteFor by remember { mutableStateOf<Desktop?>(null) }
+    var pinGate by remember { mutableStateOf(false) }
+    val visible = vm.desktops.filter { !it.secret || vm.secretUnlocked }
 
     Box(
         Modifier
@@ -98,6 +100,13 @@ fun TaskView(vm: LauncherViewModel, apps: Map<String, AppInfo>, onClose: () -> U
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Рабочие столы", style = MaterialTheme.typography.headlineSmall.copy(color = Color.White, fontWeight = FontWeight.SemiBold))
                 Spacer(Modifier.weight(1f))
+                if (vm.secretUnlocked) {
+                    TextButton({ vm.lockSecret() }) {
+                        Icon(Icons.Default.Lock, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Скрыть секретные", color = Color.White)
+                    }
+                }
                 IconButton(onClose) { Icon(Icons.Default.Close, "Закрыть", tint = Color.White) }
             }
             Text(
@@ -112,7 +121,7 @@ fun TaskView(vm: LauncherViewModel, apps: Map<String, AppInfo>, onClose: () -> U
                 verticalArrangement = Arrangement.spacedBy(18.dp),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
-                items(vm.desktops, key = { it.id }) { d ->
+                items(visible, key = { it.id }) { d ->
                     DesktopCard(
                         vm, d, apps,
                         active = d.id == vm.activeDesktop,
@@ -122,25 +131,29 @@ fun TaskView(vm: LauncherViewModel, apps: Map<String, AppInfo>, onClose: () -> U
                         onDelete = { deleteFor = d },
                     )
                 }
-                item {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(0.56f)
-                                .clip(RoundedCornerShape(18.dp))
-                                .border(2.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
-                                .clickable { onClose(); vm.addDesktop() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(40.dp))
-                                Text("Новый рабочий стол", color = Color.White)
-                            }
-                        }
+                item { AddCard(Icons.Default.Add, "Новый рабочий стол") { onClose(); vm.addDesktop() } }
+                if (vm.secretUnlocked) {
+                    item { AddCard(Icons.Default.Lock, "Новый секретный стол") { onClose(); vm.addDesktop(secret = true) } }
+                } else {
+                    item {
+                        AddCard(Icons.Default.Lock, "Секретные столы", "Откроются по PIN-коду") { pinGate = true }
                     }
                 }
             }
+        }
+    }
+
+    if (pinGate) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { pinGate = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            PinScreen(
+                vm, create = vm.secretPin == null,
+                onSuccess = { vm.unlockSecret(); pinGate = false },
+                onBack = { pinGate = false },
+                header = "Секретные столы",
+            )
         }
     }
 
@@ -208,6 +221,7 @@ private fun DesktopCard(
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (d.secret) Icon(Icons.Default.Lock, "Секретный", tint = Color(0xFFFFD166), modifier = Modifier.size(16.dp).padding(end = 2.dp))
             Text(
                 d.name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
@@ -219,11 +233,35 @@ private fun DesktopCard(
                     DropdownMenuItem({ Text("Открыть") }, { menu = false; onOpen() }, leadingIcon = { Icon(Icons.Default.OpenInNew, null) })
                     DropdownMenuItem({ Text("Обои") }, { menu = false; onWallpaper() }, leadingIcon = { Icon(Icons.Default.Wallpaper, null) })
                     DropdownMenuItem({ Text("Переименовать") }, { menu = false; onRename() }, leadingIcon = { Icon(Icons.Default.Edit, null) })
-                    if (vm.desktops.size > 1) {
+                        if (d.secret) {
+                        DropdownMenuItem({ Text("Сделать обычным") }, { menu = false; vm.setDesktopSecret(d.id, false) }, leadingIcon = { Icon(Icons.Default.LockOpen, null) })
+                    } else if (vm.desktops.count { !it.secret } > 1) {
+                        DropdownMenuItem({ Text("Сделать секретным") }, { menu = false; vm.setDesktopSecret(d.id, true) }, leadingIcon = { Icon(Icons.Default.Lock, null) })
+                    }
+                    if (vm.desktops.size > 1 && (d.secret || vm.desktops.count { !it.secret } > 1)) {
                         DropdownMenuItem({ Text("Удалить") }, { menu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, null) })
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AddCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String? = null, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.56f)
+            .clip(RoundedCornerShape(18.dp))
+            .border(2.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(40.dp))
+            Text(title, color = Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            if (subtitle != null) Text(subtitle, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.labelSmall)
         }
     }
 }

@@ -163,14 +163,14 @@ class Storage(context: Context) {
             val a = JSONArray(s)
             List(a.length()) {
                 val o = a.getJSONObject(it)
-                Desktop(o.getString("id"), o.optString("name"), o.optString("wallpaper", "system"))
+                Desktop(o.getString("id"), o.optString("name"), o.optString("wallpaper", "system"), o.optBoolean("secret"))
             }
         }.getOrNull()?.ifEmpty { null } ?: listOf(Desktop("main", "Рабочий стол 1"))
     }
 
     fun saveDesktops(list: List<Desktop>) {
         val a = JSONArray()
-        list.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("wallpaper", it.wallpaper)) }
+        list.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("wallpaper", it.wallpaper).put("secret", it.secret)) }
         prefs.edit().putString("desktops", a.toString()).apply()
     }
 

@@ -67,9 +67,6 @@ fun SecretScreen(vm: LauncherViewModel, onBack: () -> Unit) {
             onSuccess = { unlocked = true; changingPin = false },
             onBack = { if (changingPin) changingPin = false else onBack() },
         )
-        LaunchedEffect(Unit) {
-            if (!unlocked && vm.secretPin != null && biometricAvailable(ctx)) askBiometric(ctx) { unlocked = true }
-        }
         return
     }
 
@@ -108,7 +105,7 @@ fun SecretScreen(vm: LauncherViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun PinScreen(vm: LauncherViewModel, create: Boolean, onSuccess: () -> Unit, onBack: () -> Unit) {
+fun PinScreen(vm: LauncherViewModel, create: Boolean, onSuccess: () -> Unit, onBack: () -> Unit, header: String = "Секретная папка") {
     val ctx = LocalContext.current
     var entered by remember { mutableStateOf("") }
     var first by remember { mutableStateOf<String?>(null) }
@@ -146,7 +143,10 @@ private fun PinScreen(vm: LauncherViewModel, create: Boolean, onSuccess: () -> U
         }
     }
 
-    ScreenScaffold("Секретная папка", onBack) {
+    LaunchedEffect(Unit) {
+        if (!create && vm.secretPin != null && biometricAvailable(ctx)) askBiometric(ctx, onSuccess)
+    }
+    ScreenScaffold(header, onBack) {
         Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(24.dp))
             Icon(Icons.Default.Lock, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)

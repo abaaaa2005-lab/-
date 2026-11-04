@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -22,8 +24,18 @@ class MainActivity : ComponentActivity() {
     private val vm: LauncherViewModel by viewModels()
     private val stack = mutableStateOf<List<Screen>>(emptyList())
 
+    // Экран погас — секретные столы снова скрыты
+    private val screenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context?, i: Intent?) {
+            vm.lockSecret()
+            stack.value = emptyList()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        vm.lockSecret()
+        registerReceiver(screenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF))
         setContent {
             val top = stack.value.lastOrNull()
             LauncherTheme(vm.settings) {
@@ -38,6 +50,11 @@ class MainActivity : ComponentActivity() {
                 LauncherRoot(vm, top, push = { stack.value = stack.value + it }, pop = { pop() }, home = { stack.value = emptyList() })
             }
         }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(screenOff) }
+        super.onDestroy()
     }
 
     private fun pop() {
@@ -82,7 +99,14 @@ fun LauncherRoot(
         AnimatedContent(
             targetState = top,
             transitionSpec = {
-                (fadeIn() + slideInVertically { it / 10 }) togetherWith (fadeOut() + slideOutVertically { it / 10 })
+                // Как на iPhone: новый экран плавно «приближается», старый — отдаляется
+                if (targetState is Screen.Drawer || initialState is Screen.Drawer) {
+                    (fadeIn(tween(220)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 6 }) togetherWith
+                        (fadeOut(tween(180)) + slideOutVertically(tween(260)) { it / 6 })
+                } else {
+                    (fadeIn(tween(220)) + scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.88f)) togetherWith
+                        (fadeOut(tween(180)) + scaleOut(tween(260), targetScale = 0.94f))
+                }
             },
             contentKey = { it?.let { s -> s::class.simpleName + (s as? Screen.Tool)?.id } ?: "home" },
             label = "screens",

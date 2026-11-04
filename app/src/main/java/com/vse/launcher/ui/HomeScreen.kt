@@ -37,6 +37,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -183,6 +185,11 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
 
     // Окна поверх рабочего стола
     var openFolder by remember { mutableStateOf<String?>(null) }
+    var folderOrigin by remember { mutableStateOf(TransformOrigin.Center) }
+    // Выбор приложений галочками: "add" — на экран, "folder" — новая папка, "edit:<id>" — состав папки
+    var picker by remember { mutableStateOf<String?>(null) }
+    var moveFor by remember { mutableStateOf<String?>(null) }
+    val view = LocalView.current
     var menuFor by remember { mutableStateOf<Pair<String, Rect>?>(null) }
     var renaming by remember { mutableStateOf<AppInfo?>(null) }
     var clockSheet by remember { mutableStateOf(false) }
@@ -222,6 +229,17 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         else hits.owner[slot]?.let { vm.pages.getOrNull(slot.page)?.getOrNull(it) }
 
     fun iconRect(id: String): Rect? = hits.iconById[id]?.let { hits.local(it) }
+
+    /** Запуск «из иконки», как на iPhone. */
+    fun launchFrom(app: AppInfo, rootRect: Rect?) = vm.launch(app, rootRect?.toAndroidRect(), view)
+
+    /** Папка раскрывается из своего места на экране. */
+    fun openFolderAt(id: String) {
+        val r = hits.iconById[id]
+        val dm = ctx.resources.displayMetrics
+        folderOrigin = if (r != null) TransformOrigin(r.center.x / dm.widthPixels, r.center.y / dm.heightPixels) else TransformOrigin.Center
+        openFolder = id
+    }
 
     fun hitSlot(pos: Offset): Slot? {
         if (hits.local(hits.dock).contains(pos)) {
@@ -293,7 +311,9 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     id == null && hits.local(hits.clock).contains(pos) && pager.currentPage == 1 && !vm.editMode ->
                         SystemActions.alarms(ctx)
                     id == null -> {
-                        if (vm.editMode) vm.exitEditMode()
+                        val cur = pager.currentPage - 1
+                        if (!vm.editMode && cur == 0 && vm.pages.all { it.isEmpty() }) picker = "add"
+                        else if (vm.editMode) vm.exitEditMode()
                         else if (s.doubleTapLock && pager.currentPage >= 1) {
                             val t = System.currentTimeMillis()
                             if (t - lastEmptyTap < 350) SystemActions.lockScreen(ctx)
@@ -306,15 +326,15 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         val onBadge = icon != null && pos.x < icon.left + badge && pos.y < icon.top + badge
                         if (onBadge) {
                             if (id.startsWith(FOLDER_PREFIX)) confirmFolderDelete = id else vm.removeFromHome(id)
-                        } else if (id.startsWith(FOLDER_PREFIX)) openFolder = id
+                        } else if (id.startsWith(FOLDER_PREFIX)) openFolderAt(id)
                     }
                     id.startsWith(FOLDER_PREFIX) -> {
                         // В большой папке приложения запускаются прямо с рабочего стола
-                        val hit = hits.inner[id]?.firstOrNull { hits.local(it.second).contains(pos) }?.first
-                        val app = hit?.let { apps[it] }
-                        if (app != null) vm.launch(app) else openFolder = id
+                        val hit = hits.inner[id]?.firstOrNull { hits.local(it.second).contains(pos) }
+                        val app = hit?.first?.let { apps[it] }
+                        if (app != null) launchFrom(app, hit.second) else openFolderAt(id)
                     }
-                    else -> apps[id]?.let { vm.launch(it) }
+                    else -> apps[id]?.let { launchFrom(it, hits.iconById[id]) }
                 }
             },
             longPress = { pos ->
@@ -441,6 +461,8 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             if (vm.editMode) {
                 EditBar(
+                    onAddApps = { picker = "add" },
+                    onNewFolder = { picker = "folder" },
                     onAddPage = {
                         vm.addPage()
                         scope.launch { pager.animateScrollToPage(vm.pages.size) }
@@ -451,8 +473,8 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     onSettings = { open(Screen.Settings) },
                     onDone = { vm.exitEditMode() },
                 )
-            } else if (vm.desktops.size > 1) {
-                DesktopPill(desktop.name) { taskView = true }
+            } else if (vm.desktops.count { !it.secret || vm.secretUnlocked } > 1 || desktop.secret) {
+                DesktopPill(desktop.name, desktop.secret) { taskView = true }
             } else {
                 Spacer(Modifier.height(8.dp))
             }
@@ -512,10 +534,12 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         Text("«${desktop.name}» пока пуст", style = MaterialTheme.typography.titleMedium.onWallpaper())
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "Свайп вверх → удерживайте приложение → «Добавить на экран «Домой»»",
+                            "Нажмите, чтобы добавить приложения",
                             style = MaterialTheme.typography.bodyMedium.onWallpaper(),
                             textAlign = TextAlign.Center,
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Icon(Icons.Default.AddCircle, null, tint = Color.White, modifier = Modifier.size(44.dp))
                     }
                 }
                 // Пустой экран в режиме редактирования — можно удалить
@@ -555,7 +579,9 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
             ) {
                 if (id.startsWith(FOLDER_PREFIX)) {
                     DropdownMenu(expanded = true, onDismissRequest = { menuFor = null }, shape = RoundedCornerShape(16.dp)) {
-                        DropdownMenuItem(text = { Text("Открыть папку") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuFor = null; openFolder = id })
+                        DropdownMenuItem(text = { Text("Открыть папку") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuFor = null; openFolderAt(id) })
+                        DropdownMenuItem(text = { Text("Добавить приложения") }, leadingIcon = { Icon(Icons.Default.AddCircleOutline, null) }, onClick = { menuFor = null; picker = "edit:$id" })
+                        DropdownMenuItem(text = { Text("Переместить…") }, leadingIcon = { Icon(Icons.Default.OpenWith, null) }, onClick = { menuFor = null; moveFor = id })
                         val big = vm.folders[id]?.big == true
                         DropdownMenuItem(
                             text = { Text(if (big) "Сделать маленькой" else "Сделать большой (2×2)") },
@@ -571,6 +597,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         onDismiss = { menuFor = null },
                         onRename = { renaming = app },
                         onEdit = { vm.editMode = true },
+                        onMove = { moveFor = id },
                     )
                 }
             }
@@ -579,12 +606,12 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         // Открытая папка — «окно» поверх рабочего стола
         AnimatedVisibility(
             visible = openFolder != null,
-            enter = fadeIn() + scaleIn(initialScale = 0.85f),
-            exit = fadeOut() + scaleOut(targetScale = 0.85f),
+            enter = fadeIn(tween(220)) + scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.12f, transformOrigin = folderOrigin),
+            exit = fadeOut(tween(200)) + scaleOut(tween(260), targetScale = 0.12f, transformOrigin = folderOrigin),
         ) {
             var lastFolder by remember { mutableStateOf<String?>(null) }
             if (openFolder != null) lastFolder = openFolder
-            lastFolder?.let { fid -> FolderWindow(vm, fid, onClose = { openFolder = null }) }
+            lastFolder?.let { fid -> FolderWindow(vm, fid, onClose = { openFolder = null }, onAddApps = { picker = "edit:$fid" }) }
         }
 
         // Название стола после переключения
@@ -610,6 +637,31 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
     BackHandler(enabled = taskView) { taskView = false }
 
     renaming?.let { app -> RenameDialog(app, vm) { renaming = null } }
+
+    moveFor?.let { id -> MoveDialog(vm, id, (pager.currentPage - 1).coerceAtLeast(0)) { moveFor = null } }
+
+    picker?.let { mode ->
+        val page = (pager.currentPage - 1).coerceAtLeast(0)
+        when {
+            mode == "add" -> AppPickerDialog(
+                vm, "Добавить на экран ${page + 1}", "Добавить",
+                onDismiss = { picker = null },
+            ) { keys -> vm.addManyToPage(keys, page) }
+            mode == "folder" -> AppPickerDialog(
+                vm, "Новая папка", "Создать",
+                onDismiss = { picker = null },
+            ) { keys -> vm.createFolder(keys, page) }
+            mode.startsWith("edit:") -> {
+                val fid = mode.removePrefix("edit:")
+                val f = vm.folders[fid]
+                if (f == null) picker = null
+                else AppPickerDialog(
+                    vm, "Папка «${f.name}»", "Готово", initial = f.apps.toSet(),
+                    onDismiss = { picker = null },
+                ) { keys -> vm.setFolderApps(fid, keys) }
+            }
+        }
+    }
 
     confirmFolderDelete?.let { fid ->
         AlertDialog(
@@ -1050,17 +1102,35 @@ private fun PageDots(count: Int, current: Int) {
 }
 
 @Composable
-private fun EditBar(onAddPage: () -> Unit, onAutoFolders: () -> Unit, onDesktops: () -> Unit, onWallpaper: () -> Unit, onSettings: () -> Unit, onDone: () -> Unit) {
+private fun EditBar(
+    onAddApps: () -> Unit,
+    onNewFolder: () -> Unit,
+    onAddPage: () -> Unit,
+    onAutoFolders: () -> Unit,
+    onDesktops: () -> Unit,
+    onWallpaper: () -> Unit,
+    onSettings: () -> Unit,
+    onDone: () -> Unit,
+) {
+    var more by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        GlassButton(Icons.Default.Add, null, onAddPage)
-        GlassButton(Icons.Default.CreateNewFolder, "Папки", onAutoFolders)
-        GlassButton(Icons.Default.DesktopWindows, "Столы", onDesktops)
-        GlassButton(Icons.Default.Wallpaper, null, onWallpaper)
-        GlassButton(Icons.Default.Settings, null, onSettings)
+        GlassButton(Icons.Default.Add, "Добавить", onAddApps)
+        GlassButton(Icons.Default.CreateNewFolder, "Папка", onNewFolder)
+        GlassButton(Icons.Default.DesktopWindows, null, onDesktops)
+        Box {
+            GlassButton(Icons.Default.MoreHoriz, null) { more = true }
+            DropdownMenu(more, { more = false }, shape = RoundedCornerShape(16.dp)) {
+                DropdownMenuItem({ Text("Новый экран") }, { more = false; onAddPage() }, leadingIcon = { Icon(Icons.Default.AddToPhotos, null) })
+                DropdownMenuItem({ Text("Разложить по папкам") }, { more = false; onAutoFolders() }, leadingIcon = { Icon(Icons.Default.AutoAwesome, null) })
+                DropdownMenuItem({ Text("Рабочие столы") }, { more = false; onDesktops() }, leadingIcon = { Icon(Icons.Default.DesktopWindows, null) })
+                DropdownMenuItem({ Text("Обои телефона") }, { more = false; onWallpaper() }, leadingIcon = { Icon(Icons.Default.Wallpaper, null) })
+                DropdownMenuItem({ Text("Настройки") }, { more = false; onSettings() }, leadingIcon = { Icon(Icons.Default.Settings, null) })
+            }
+        }
         Spacer(Modifier.weight(1f))
         Box(
             Modifier.clip(RoundedCornerShape(50)).background(Color.White).clickable(onClick = onDone)
@@ -1089,7 +1159,7 @@ private fun GlassButton(icon: androidx.compose.ui.graphics.vector.ImageVector, t
 // ======================================================================
 
 @Composable
-private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () -> Unit) {
+private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () -> Unit, onAddApps: () -> Unit) {
     val folder = vm.folders[folderId]
     if (folder == null) {
         LaunchedEffect(Unit) { onClose() }
@@ -1145,6 +1215,16 @@ private fun FolderWindow(vm: LauncherViewModel, folderId: String, onClose: () ->
                 }
             }
             Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.22f))
+                    .clickable(onClick = onAddApps).padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Добавить или убрать приложения", color = Color.White)
+            }
+            Spacer(Modifier.height(8.dp))
             Row(
                 Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.22f))
                     .clickable { vm.toggleFolderBig(folderId) }.padding(horizontal = 16.dp, vertical = 10.dp),

@@ -24,7 +24,7 @@ data class Folder(val id: String, val name: String, val apps: List<String>, val 
  * Рабочий стол (как виртуальные рабочие столы в Windows): свои экраны с иконками и свои обои.
  * wallpaper: "system" — системные обои, "grad:N" — градиент из набора, "file:/путь" — картинка из галереи.
  */
-data class Desktop(val id: String, val name: String, val wallpaper: String = "system")
+data class Desktop(val id: String, val name: String, val wallpaper: String = "system", val secret: Boolean = false)
 
 /** Готовые обои-градиенты. */
 val WALLPAPER_PRESETS: List<Pair<String, List<Long>>> = listOf(

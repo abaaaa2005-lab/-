@@ -16,6 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Rect as CRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,20 +54,25 @@ fun AppIcon(
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    var iconBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
     Box(modifier) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .combinedClickable(
-                    onClick = { vm.launch(app); onLaunched() },
+                    onClick = { vm.launch(app, iconBounds, view); onLaunched() },
                     onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true },
                 )
                 .padding(vertical = 6.dp, horizontal = 2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (app.icon != null) {
-                Image(app.icon, contentDescription = app.label, modifier = Modifier.size(iconSize))
+                Image(
+                    app.icon, contentDescription = app.label,
+                    modifier = Modifier.size(iconSize).onGloballyPositioned { iconBounds = it.boundsInWindow().toAndroidRect() },
+                )
             } else {
                 Box(
                     Modifier.size(iconSize).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
@@ -97,6 +105,7 @@ fun AppMenu(
     onRename: () -> Unit,
     folderId: String? = null,
     onEdit: (() -> Unit)? = null,
+    onMove: (() -> Unit)? = null,
 ) {
     val onHome = vm.isOnHome(app.key)
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, shape = RoundedCornerShape(16.dp)) {
@@ -113,6 +122,7 @@ fun AppMenu(
         } else {
             MenuItem("Добавить на экран «Домой»", Icons.Default.AddToHomeScreen) { vm.addToHome(app.key); onDismiss() }
         }
+        if (onMove != null) MenuItem("Переместить…", Icons.Default.OpenWith) { onDismiss(); onMove() }
         if (onEdit != null) MenuItem("Изменить экран «Домой»", Icons.Default.Edit) { onDismiss(); onEdit() }
         MenuItem("Переименовать", Icons.Default.DriveFileRenameOutline) { onDismiss(); onRename() }
         if (app.key in vm.hidden) MenuItem("Вернуть из секретной папки", Icons.Default.LockOpen) { vm.setHidden(app, false); onDismiss() }
@@ -208,3 +218,6 @@ fun RoundTile(
         Text(label, style = if (onWallpaper) style.onWallpaper() else style, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+
+/** Прямоугольник Compose → android.graphics.Rect (для анимации запуска). */
+fun CRect.toAndroidRect() = android.graphics.Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
