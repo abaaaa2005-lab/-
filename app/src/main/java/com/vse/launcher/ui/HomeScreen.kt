@@ -37,6 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.geometry.Offset
@@ -928,11 +931,13 @@ fun ClockWidget(
     val color = Color(s.clockColor)
     val align = when (s.clockAlign) { 0 -> Alignment.Start; 2 -> Alignment.End; else -> Alignment.CenterHorizontally }
     val textAlign = when (s.clockAlign) { 0 -> TextAlign.Start; 2 -> TextAlign.End; else -> TextAlign.Center }
-    val shadow = if (s.clockColor == 0xFF000000) null else WallpaperShadow
+    val shadow = if (s.clockColor == 0xFF000000 || s.clockStyle == 1) null else WallpaperShadow
     val w = vm.weather
+    val density = LocalDensity.current
 
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).alpha(if (jiggle) 0.75f else 1f),
+        modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
+            .alpha((if (jiggle) 0.75f else 1f) * s.clockAlpha.coerceIn(0.05f, 1f)),
         horizontalAlignment = align,
     ) {
         if (s.showDate || (s.showWeather && w != null)) {
@@ -945,57 +950,125 @@ fun ClockWidget(
             }
             Text(
                 line,
-                style = TextStyle(color = color, fontSize = (s.clockSize * 0.2f).coerceIn(14f, 24f).sp, fontWeight = FontWeight.SemiBold, shadow = shadow),
+                style = TextStyle(color = color, fontSize = (s.clockSize * 0.2f).coerceIn(13f, 30f).sp, fontWeight = FontWeight.SemiBold, shadow = shadow),
                 textAlign = textAlign,
                 modifier = Modifier.onGloballyPositioned { onDateLine(it.boundsInRoot()) },
             )
         }
-        Text(
-            time,
-            style = TextStyle(
-                color = color,
-                fontSize = s.clockSize.sp,
-                lineHeight = (s.clockSize * 1.05f).sp,
-                fontWeight = CLOCK_WEIGHTS.getOrElse(s.clockWeight) { FontWeight.Light },
-                fontFamily = CLOCK_FONTS.getOrElse(s.clockFont) { FontFamily.Default },
-                shadow = shadow,
-            ),
+        var style = TextStyle(
+            color = color,
+            fontSize = s.clockSize.sp,
+            lineHeight = (s.clockSize * 0.98f).sp,
+            fontWeight = CLOCK_WEIGHTS.getOrElse(s.clockWeight) { FontWeight.Light },
+            fontFamily = CLOCK_FONTS.getOrElse(s.clockFont) { FontFamily.Default },
+            shadow = shadow,
             textAlign = textAlign,
-            maxLines = 1,
         )
+        when (s.clockStyle) {
+            1 -> style = style.copy(drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = with(density) { (s.clockSize / 40f).coerceAtLeast(1.5f).dp.toPx() }))
+            2 -> style = style.copy(brush = Brush.linearGradient(listOf(color, Color(0xFFFF7675), Color(0xFFA29BFE), Color(0xFF74B9FF))))
+        }
+        // Огромные часы сами встают в две строки (часы над минутами), как на экране блокировки iPhone
+        val measurer = rememberTextMeasurer()
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = when (s.clockAlign) {
+            0 -> Alignment.TopStart; 2 -> Alignment.TopEnd; else -> Alignment.TopCenter
+        }) {
+            val maxW = constraints.maxWidth
+            val oneLine = remember(time, style, s.clockScaleX) {
+                measurer.measure(time, style.copy(drawStyle = null, brush = null), softWrap = false).size.width * s.clockScaleX
+            }
+            val stacked = when (s.clockLines) {
+                1 -> false
+                2 -> true
+                else -> oneLine > maxW
+            }
+            Text(
+                if (stacked) time.split(":").joinToString("\n") else time,
+                style = style,
+                softWrap = false,
+                modifier = Modifier.stretch(s.clockScaleX, s.clockScaleY),
+            )
+        }
     }
 }
 
-/** Настройки часов: размер, толщина, шрифт, цвет, выравнивание. Используется в шторке и в настройках. */
+/** Растянуть содержимое по ширине/высоте (размер в разметке тоже меняется). */
+private fun Modifier.stretch(sx: Float, sy: Float): Modifier = this.then(
+    Modifier.layout { measurable, constraints ->
+        val p = measurable.measure(constraints.copy(minWidth = 0, maxWidth = androidx.compose.ui.unit.Constraints.Infinity))
+        val w = (p.width * sx).roundToInt().coerceAtMost(constraints.maxWidth)
+        val h = (p.height * sy).roundToInt()
+        layout(w, h) {
+            // Центрируем, если растянутое не помещается
+            val dx = ((w - p.width * sx) / 2f).roundToInt()
+            p.placeWithLayer(dx, 0) {
+                scaleX = sx
+                scaleY = sy
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        }
+    }
+)
+
+/** Настройки часов: размер, растяжение, прозрачность, стиль, шрифт, цвет. Используется в шторке и в настройках. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ClockControls(vm: LauncherViewModel) {
     val s = vm.settings
+    fun set(f: (Settings) -> Settings) = vm.updateSettings(f)
     Column(Modifier.padding(horizontal = 20.dp)) {
         // Предпросмотр
         Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF2D3436)).padding(vertical = 8.dp),
+            Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(20.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF2D3436), Color(0xFF0063B1)))).padding(vertical = 8.dp),
         ) { ClockWidget(s, vm) }
         Spacer(Modifier.height(12.dp))
-        Text("Размер: ${s.clockSize.roundToInt()}", style = MaterialTheme.typography.bodyLarge)
-        Slider(s.clockSize, { v -> vm.updateSettings { it.copy(clockSize = v) } }, valueRange = 36f..180f)
-        Text("Толщина", style = MaterialTheme.typography.bodyLarge)
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Размер: ${s.clockSize.roundToInt()}", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            FilledTonalIconButton({ set { it.copy(clockSize = (it.clockSize - 4f).coerceAtLeast(16f)) } }) { Icon(Icons.Default.Remove, "Меньше") }
+            FilledTonalIconButton({ set { it.copy(clockSize = (it.clockSize + 4f).coerceAtMost(400f)) } }) { Icon(Icons.Default.Add, "Больше") }
+        }
+        Slider(s.clockSize, { v -> set { it.copy(clockSize = v) } }, valueRange = 16f..400f)
+
+        Text("По высоте: ×${"%.2f".format(s.clockScaleY)}", style = MaterialTheme.typography.bodyLarge)
+        Slider(s.clockScaleY, { v -> set { it.copy(clockScaleY = v) } }, valueRange = 0.4f..3f)
+        Text("По ширине: ×${"%.2f".format(s.clockScaleX)}", style = MaterialTheme.typography.bodyLarge)
+        Slider(s.clockScaleX, { v -> set { it.copy(clockScaleX = v) } }, valueRange = 0.4f..2f)
+        Text("Прозрачность: ${(100 - s.clockAlpha * 100).roundToInt()}%", style = MaterialTheme.typography.bodyLarge)
+        Slider(s.clockAlpha, { v -> set { it.copy(clockAlpha = v) } }, valueRange = 0.05f..1f)
+        TextButton({ set { it.copy(clockSize = 84f, clockScaleX = 1f, clockScaleY = 1f, clockAlpha = 1f) } }) {
+            Icon(Icons.Default.RestartAlt, null); Spacer(Modifier.width(6.dp)); Text("Сбросить размер и прозрачность")
+        }
+
+        Text("Строки", style = MaterialTheme.typography.bodyLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Авто", "Одна", "Две").forEachIndexed { i, n ->
+                FilterChip(s.clockLines == i, { set { it.copy(clockLines = i) } }, label = { Text(n) })
+            }
+        }
+        Text("Стиль цифр", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Заливка", "Контур", "Градиент").forEachIndexed { i, n ->
+                FilterChip(s.clockStyle == i, { set { it.copy(clockStyle = i) } }, label = { Text(n) })
+            }
+        }
+        Text("Толщина", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CLOCK_WEIGHT_NAMES.forEachIndexed { i, n ->
-                FilterChip(s.clockWeight == i, { vm.updateSettings { it.copy(clockWeight = i) } }, label = { Text(n) })
+                FilterChip(s.clockWeight == i, { set { it.copy(clockWeight = i) } }, label = { Text(n) })
             }
         }
         Text("Шрифт", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CLOCK_FONT_NAMES.forEachIndexed { i, n ->
-                FilterChip(s.clockFont == i, { vm.updateSettings { it.copy(clockFont = i) } }, label = { Text(n, fontFamily = CLOCK_FONTS[i]) })
+                FilterChip(s.clockFont == i, { set { it.copy(clockFont = i) } }, label = { Text(n, fontFamily = CLOCK_FONTS[i]) })
             }
         }
         Text("Положение", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Слева", "По центру", "Справа").forEachIndexed { i, n ->
-                FilterChip(s.clockAlign == i, { vm.updateSettings { it.copy(clockAlign = i) } }, label = { Text(n) })
+                FilterChip(s.clockAlign == i, { set { it.copy(clockAlign = i) } }, label = { Text(n) })
             }
         }
         Text("Цвет", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
@@ -1009,15 +1082,15 @@ fun ClockControls(vm: LauncherViewModel) {
                                 .clip(CircleShape).background(Color(c))
                             else Modifier
                         )
-                        .clickable { vm.updateSettings { it.copy(clockColor = c) } },
+                        .clickable { set { it.copy(clockColor = c) } },
                 )
             }
         }
-        SwitchLine("Показывать часы", s.showClock) { v -> vm.updateSettings { it.copy(showClock = v) } }
-        SwitchLine("Дата над часами", s.showDate) { v -> vm.updateSettings { it.copy(showDate = v) } }
-        SwitchLine("Погода рядом с датой", s.showWeather) { v -> vm.updateSettings { it.copy(showWeather = v) }; vm.refreshWeather() }
-        SwitchLine("24-часовой формат", s.use24h) { v -> vm.updateSettings { it.copy(use24h = v) } }
-        SwitchLine("Секунды", s.showSeconds) { v -> vm.updateSettings { it.copy(showSeconds = v) } }
+        SwitchLine("Показывать часы", s.showClock) { v -> set { it.copy(showClock = v) } }
+        SwitchLine("Дата над часами", s.showDate) { v -> set { it.copy(showDate = v) } }
+        SwitchLine("Погода рядом с датой", s.showWeather) { v -> set { it.copy(showWeather = v) }; vm.refreshWeather() }
+        SwitchLine("24-часовой формат", s.use24h) { v -> set { it.copy(use24h = v) } }
+        SwitchLine("Секунды", s.showSeconds) { v -> set { it.copy(showSeconds = v) } }
     }
 }
 

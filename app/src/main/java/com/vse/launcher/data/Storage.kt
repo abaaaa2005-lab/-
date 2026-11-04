@@ -40,6 +40,11 @@ class Storage(context: Context) {
                 clockAlign = o.optInt("clockAlign", d.clockAlign),
                 clockColor = o.optLong("clockColor", d.clockColor),
                 showDate = o.optBoolean("showDate", d.showDate),
+                clockScaleX = o.optDouble("clockScaleX", 1.0).toFloat(),
+                clockScaleY = o.optDouble("clockScaleY", 1.0).toFloat(),
+                clockAlpha = o.optDouble("clockAlpha", 1.0).toFloat(),
+                clockStyle = o.optInt("clockStyle", 0),
+                clockLines = o.optInt("clockLines", 0),
                 iconShape = o.optInt("iconShape", d.iconShape),
                 doubleTapLock = o.optBoolean("doubleTapLock", d.doubleTapLock),
                 drawerSort = runCatching { DrawerSort.valueOf(o.optString("drawerSort")) }.getOrDefault(d.drawerSort),
@@ -77,6 +82,11 @@ class Storage(context: Context) {
             .put("clockAlign", s.clockAlign)
             .put("clockColor", s.clockColor)
             .put("showDate", s.showDate)
+            .put("clockScaleX", s.clockScaleX.toDouble())
+            .put("clockScaleY", s.clockScaleY.toDouble())
+            .put("clockAlpha", s.clockAlpha.toDouble())
+            .put("clockStyle", s.clockStyle)
+            .put("clockLines", s.clockLines)
             .put("iconShape", s.iconShape)
             .put("doubleTapLock", s.doubleTapLock)
             .put("drawerSort", s.drawerSort.name)

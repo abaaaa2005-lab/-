@@ -97,6 +97,11 @@ data class Settings(
     val clockAlign: Int = 1,            // 0 слева, 1 по центру, 2 справа
     val clockColor: Long = 0xFFFFFFFF,
     val showDate: Boolean = true,
+    val clockScaleX: Float = 1f,        // растянуть по ширине
+    val clockScaleY: Float = 1f,        // растянуть по высоте
+    val clockAlpha: Float = 1f,         // прозрачность
+    val clockStyle: Int = 0,            // 0 заливка, 1 контур, 2 градиент
+    val clockLines: Int = 0,            // 0 авто, 1 одна строка, 2 две строки
     // Иконки
     val iconShape: Int = 0,             // 0 как на iPhone, 1 круг, 2 системная
     val drawerSort: DrawerSort = DrawerSort.ALPHA,

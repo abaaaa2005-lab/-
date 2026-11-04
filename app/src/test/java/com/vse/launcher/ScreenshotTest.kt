@@ -88,6 +88,12 @@ class ScreenshotTest {
         com.vse.launcher.ui.jiggleAnimation = false
         try { shoot("edit") { _, vm -> vm.editMode = true } } finally { com.vse.launcher.ui.jiggleAnimation = true }
     }
+    @Test fun bigClock() = shoot("bigclock") { _, vm ->
+        vm.updateSettings { it.copy(clockSize = 300f, clockScaleY = 1.3f, clockAlpha = 0.6f, clockStyle = 2, clockWeight = 3) }
+    }
+    @Test fun outlineClock() = shoot("outlineclock") { _, vm ->
+        vm.updateSettings { it.copy(clockSize = 120f, clockScaleX = 0.7f, clockScaleY = 1.8f, clockStyle = 1, clockAlign = 0) }
+    }
     @Test fun bigFolder() = shoot("bigfolder") { _, vm ->
         vm.folders.values.filter { it.apps.size >= 4 }.take(2).forEach { vm.toggleFolderBig(it.id) }
     }
