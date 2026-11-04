@@ -188,6 +188,15 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
     val cellH = iconSize + (if (s.showLabels) 20.dp else 0.dp) + 14.dp
     var clockHeightPx by remember { mutableIntStateOf(0) }
 
+    // Пока приложения грузятся, экранов ещё нет — как только появятся, встаём на первый
+    var positioned by remember { mutableStateOf(false) }
+    LaunchedEffect(pager.pageCount) {
+        if (!positioned && pager.pageCount > 1) {
+            pager.scrollToPage(1)
+            positioned = true
+        }
+    }
+
     // Кнопка «Домой» — на первый экран, выйти из редактирования
     LaunchedEffect(vm.homeSignal) {
         if (vm.homeSignal > 0) {
