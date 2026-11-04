@@ -62,6 +62,8 @@ class ScreenshotTest {
     }
 
     private fun shoot(name: String, setup: (MainActivity, LauncherViewModel) -> Unit = { _, _ -> }) {
+        androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSharedPreferences("vse_launcher", 0).edit().clear().commit()
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario.onActivity { act ->
             val vm = ViewModelProvider(act)[LauncherViewModel::class.java]
