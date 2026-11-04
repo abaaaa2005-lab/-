@@ -120,6 +120,9 @@ fun greeting(hour: Int) = when (hour) {
     else -> "Доброй ночи"
 }
 
+/** Дрожание иконок в режиме редактирования (в тестах выключается). */
+internal var jiggleAnimation = true
+
 /** «Стекло» для виджетов и дока. */
 private val Glass = Color.White.copy(alpha = 0.20f)
 private val GlassDark = Color.Black.copy(alpha = 0.22f)
@@ -767,7 +770,7 @@ private fun HomeIcon(
     val label = folder?.name ?: app!!.label
     val big = folder != null && folder.big && bigArea != null && !forceSmall
 
-    val rotation = if (jiggle) {
+    val rotation = if (jiggle && jiggleAnimation) {
         val t = rememberInfiniteTransition(label = "jiggle")
         val a by t.animateFloat(
             initialValue = if (big) -0.8f else -1.6f, targetValue = if (big) 0.8f else 1.6f,
@@ -1114,9 +1117,9 @@ private fun EditBar(
 ) {
     var more by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         GlassButton(Icons.Default.Add, "Добавить", onAddApps)
         GlassButton(Icons.Default.CreateNewFolder, "Папка", onNewFolder)
@@ -1134,8 +1137,8 @@ private fun EditBar(
         Spacer(Modifier.weight(1f))
         Box(
             Modifier.clip(RoundedCornerShape(50)).background(Color.White).clickable(onClick = onDone)
-                .padding(horizontal = 18.dp, vertical = 9.dp),
-        ) { Text("Готово", color = Color.Black, fontWeight = FontWeight.SemiBold) }
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+        ) { Text("Готово", color = Color.Black, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false) }
     }
 }
 
@@ -1143,13 +1146,13 @@ private fun EditBar(
 private fun GlassButton(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String?, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(50)).background(Glass).clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = if (text == null) 9.dp else 11.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, text, tint = Color.White, modifier = Modifier.size(18.dp))
         if (text != null) {
             Spacer(Modifier.width(4.dp))
-            Text(text, color = Color.White, style = MaterialTheme.typography.labelLarge)
+            Text(text, color = Color.White, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
         }
     }
 }

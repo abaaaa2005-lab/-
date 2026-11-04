@@ -84,7 +84,10 @@ class ScreenshotTest {
     }
 
     @Test fun home() = shoot("home")
-    @Test fun editMode() = shoot("edit") { _, vm -> vm.editMode = true }
+    @Test fun editMode() {
+        com.vse.launcher.ui.jiggleAnimation = false
+        try { shoot("edit") { _, vm -> vm.editMode = true } } finally { com.vse.launcher.ui.jiggleAnimation = true }
+    }
     @Test fun bigFolder() = shoot("bigfolder") { _, vm ->
         vm.folders.values.filter { it.apps.size >= 4 }.take(2).forEach { vm.toggleFolderBig(it.id) }
     }
