@@ -200,17 +200,21 @@ fun TodoTool(vm: LauncherViewModel, onBack: () -> Unit) {
 @Composable
 fun WeatherTool(vm: LauncherViewModel, onBack: () -> Unit) {
     val w = vm.weather
+    var cityDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refreshWeatherIfStale() }
     ScreenScaffold("Погода · ${vm.settings.weatherCity}", onBack, actions = {
+        IconButton({ cityDialog = true }) { Icon(Icons.Default.LocationCity, "Город") }
         IconButton({ vm.refreshWeather() }) { Icon(Icons.Default.Refresh, "Обновить") }
     }) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             if (vm.weatherLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (w == null) {
                 Text(
-                    if (vm.weatherLoading) "Загружаю…" else "Нет данных. Проверьте интернет и город в настройках лаунчера.",
+                    if (vm.weatherLoading) "Загружаю…" else (vm.weatherError ?: "Нет данных. Проверьте интернет."),
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
+                Button({ cityDialog = true }) { Text("Выбрать город") }
+                if (cityDialog) com.vse.launcher.ui.CityDialog(vm) { cityDialog = false }
                 return@Column
             }
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -250,7 +254,8 @@ fun WeatherTool(vm: LauncherViewModel, onBack: () -> Unit) {
                 HorizontalDivider()
             }
             Spacer(Modifier.height(12.dp))
-            Text("Данные: Open-Meteo.com", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (cityDialog) com.vse.launcher.ui.CityDialog(vm) { cityDialog = false }
+            Text("Данные: Open-Meteo.com / wttr.in", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

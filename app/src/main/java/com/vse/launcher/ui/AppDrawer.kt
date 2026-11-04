@@ -177,6 +177,16 @@ fun AppDrawer(vm: LauncherViewModel, startSearch: Boolean, onClose: () -> Unit, 
                     AppIcon(app, vm, s.iconSizeDp.dp, s.showLabels, onWallpaper = false)
                 }
 
+                if (q.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Box(Modifier.padding(top = 12.dp)) {
+                            ResultRow(Icons.Default.Lock, "Секретная папка", "Приложения под PIN-кодом · ${vm.hidden.size}") {
+                                open(Screen.HiddenApps)
+                            }
+                        }
+                    }
+                }
+
                 if (q.isNotEmpty()) {
                     val ql = q.lowercase()
                     val tools = ToolId.entries.filter { it.title.lowercase().contains(ql) || it.keywords.contains(ql) }

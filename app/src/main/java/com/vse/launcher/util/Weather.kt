@@ -25,8 +25,8 @@ data class City(val name: String, val lat: Double, val lon: Double, val country:
 object Weather {
     private fun get(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 10_000
+        conn.connectTimeout = 6_000
+        conn.readTimeout = 8_000
         return try {
             conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
@@ -34,7 +34,11 @@ object Weather {
         }
     }
 
-    suspend fun fetch(lat: Double, lon: Double): WeatherData? = withContext(Dispatchers.IO) {
+    /** Сначала Open-Meteo, если не ответил — запасной источник wttr.in. */
+    suspend fun fetch(lat: Double, lon: Double): WeatherData? =
+        fetchOpenMeteo(lat, lon) ?: fetchWttr(lat, lon)
+
+    private suspend fun fetchOpenMeteo(lat: Double, lon: Double): WeatherData? = withContext(Dispatchers.IO) {
         runCatching {
             val json = JSONObject(
                 get(
@@ -66,17 +70,81 @@ object Weather {
         }.getOrNull()
     }
 
-    suspend fun findCity(name: String): List<City> = withContext(Dispatchers.IO) {
+    private suspend fun fetchWttr(lat: Double, lon: Double): WeatherData? = withContext(Dispatchers.IO) {
         runCatching {
-            val q = URLEncoder.encode(name, "UTF-8")
-            val json = JSONObject(get("https://geocoding-api.open-meteo.com/v1/search?name=$q&count=5&language=ru"))
+            val json = JSONObject(get("https://wttr.in/${"%.4f".format(java.util.Locale.US, lat)},${"%.4f".format(java.util.Locale.US, lon)}?format=j1"))
+            val cur = json.getJSONArray("current_condition").getJSONObject(0)
+            val days = json.getJSONArray("weather")
+            WeatherData(
+                temp = cur.getString("temp_C").toDouble(),
+                feelsLike = cur.optString("FeelsLikeC", cur.getString("temp_C")).toDouble(),
+                wind = cur.optString("windspeedKmph", "0").toDouble() / 3.6,
+                humidity = cur.optString("humidity", "0").toInt(),
+                code = wwoToWmo(cur.optString("weatherCode", "113").toInt()),
+                days = List(days.length()) {
+                    val d = days.getJSONObject(it)
+                    val hourly = d.optJSONArray("hourly")
+                    val code = hourly?.optJSONObject((hourly.length() / 2).coerceAtLeast(0))?.optString("weatherCode", "113")?.toInt() ?: 113
+                    DayForecast(d.getString("date"), d.getString("mintempC").toDouble(), d.getString("maxtempC").toDouble(), wwoToWmo(code))
+                },
+                fetchedAt = System.currentTimeMillis(),
+            )
+        }.getOrNull()
+    }
+
+    /** Коды погоды wttr.in (WWO) → коды WMO, которые понимает лаунчер. */
+    private fun wwoToWmo(c: Int): Int = when (c) {
+        113 -> 0
+        116 -> 2
+        119, 122 -> 3
+        143, 248, 260 -> 45
+        176, 263, 266, 293, 296 -> 51
+        179, 227, 230, 323, 326, 329, 332, 335, 338, 368, 371 -> 71
+        200, 386, 389, 392, 395 -> 95
+        else -> 61
+    }
+
+    suspend fun findCity(name: String): List<City> = withContext(Dispatchers.IO) {
+        val q = name.trim().lowercase()
+        val local = KZ_CITIES.filter { it.name.lowercase().startsWith(q) }
+        val remote = runCatching {
+            val enc = URLEncoder.encode(name.trim(), "UTF-8")
+            val json = JSONObject(get("https://geocoding-api.open-meteo.com/v1/search?name=$enc&count=8&language=ru"))
             val arr = json.optJSONArray("results") ?: return@runCatching emptyList()
             List(arr.length()) {
                 val o = arr.getJSONObject(it)
                 City(o.getString("name"), o.getDouble("latitude"), o.getDouble("longitude"), o.optString("country"))
             }
         }.getOrDefault(emptyList())
+        // Казахстан — первым
+        (local + remote.sortedByDescending { it.country == "Казахстан" })
+            .distinctBy { it.name + it.country }
     }
+
+    /** Города Казахстана — работают даже без поиска в интернете. */
+    val KZ_CITIES = listOf(
+        City("Алматы", 43.2389, 76.8897, "Казахстан"),
+        City("Астана", 51.1694, 71.4491, "Казахстан"),
+        City("Шымкент", 42.3417, 69.5901, "Казахстан"),
+        City("Караганда", 49.8047, 73.1094, "Казахстан"),
+        City("Актобе", 50.2839, 57.1670, "Казахстан"),
+        City("Тараз", 42.9000, 71.3667, "Казахстан"),
+        City("Павлодар", 52.2873, 76.9674, "Казахстан"),
+        City("Усть-Каменогорск", 49.9483, 82.6279, "Казахстан"),
+        City("Семей", 50.4111, 80.2275, "Казахстан"),
+        City("Атырау", 47.1167, 51.8833, "Казахстан"),
+        City("Костанай", 53.2144, 63.6246, "Казахстан"),
+        City("Кызылорда", 44.8528, 65.5092, "Казахстан"),
+        City("Уральск", 51.2333, 51.3667, "Казахстан"),
+        City("Петропавловск", 54.8667, 69.1500, "Казахстан"),
+        City("Актау", 43.6500, 51.1667, "Казахстан"),
+        City("Туркестан", 43.2973, 68.2518, "Казахстан"),
+        City("Талдыкорган", 45.0156, 78.3739, "Казахстан"),
+        City("Кокшетау", 53.2833, 69.4000, "Казахстан"),
+        City("Экибастуз", 51.7298, 75.3266, "Казахстан"),
+        City("Жезказган", 47.7833, 67.7667, "Казахстан"),
+        City("Конаев", 43.8667, 77.0667, "Казахстан"),
+    )
 
     fun emoji(code: Int): String = when (code) {
         0 -> "☀️"

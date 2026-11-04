@@ -53,6 +53,10 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var weatherLoading by mutableStateOf(false)
         private set
+    var weatherError by mutableStateOf<String?>(null)
+        private set
+    var secretPin by mutableStateOf(storage.getString("secretPin")?.takeIf { it.isNotEmpty() })
+        private set
     var torchOn by mutableStateOf(false)
         private set
 
@@ -237,7 +241,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setHidden(app: AppInfo, hide: Boolean) {
         hidden = if (hide) hidden + app.key else hidden - app.key
-        if (hide) removeFromHome(app.key)
+        if (hide) removeFromHome(app.key) else addToHome(app.key)
         if (hide && app.key in favorites) {
             favorites = favorites - app.key
             storage.saveStringList("favorites", favorites)
@@ -288,6 +292,8 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
             val favFirst = favorites.filter { it in rest }
             pages = listOf(favFirst + rest.filter { it !in favFirst })
             homeInitialized = true
+            applyAutoFolders()
+            storage.putString("autoFolders1", "1")
         } else {
             // Новые приложения — в конец последнего экрана, как на iPhone
             val newOnes = allApps.map { it.key }.filter { it !in known && it !in hidden && !isOnHome(it) }
@@ -301,6 +307,11 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
             dissolveSmallFolders()
         }
         if (pages.isEmpty()) pages = listOf(emptyList())
+        // Обновление с первой версии: один раз раскладываем приложения по папкам
+        if (storage.getString("autoFolders1") == null) {
+            applyAutoFolders()
+            storage.putString("autoFolders1", "1")
+        }
         known = keys
         storage.saveStringList("known", known)
         normalize()
@@ -410,6 +421,69 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Категория приложения для автоматических папок. */
+    private fun bucket(a: AppInfo): String? {
+        val p = a.packageName.lowercase()
+        fun has(vararg k: String) = k.any { p.contains(it) }
+        return when {
+            has("telegram", "whatsapp", "viber", "vkontakte", "com.vk.", "instagram", "facebook", "messenger", "discord",
+                "snapchat", "tiktok", "musically", "twitter", "threads", "skype", "zoom", "signal", "wechat", "odnoklassniki", "ok.android") -> "Общение"
+            has("kaspi", "halyk", "bank", "sber", "tinkoff", "jusan", "freedom", "forte", "bcc", "homecredit", "paypal", "wallet") -> "Финансы"
+            has("taxi", "uber", "indriver", "indrive", "yandex.go", "bolt", "2gis", "dublgis", "navigator", "maps", "waze", "glovo", "wolt", "choco") -> "Поездки и еда"
+            has("wildberries", "ozon", "aliexpress", "alibaba", "olx", "krisha", "kolesa", "lamoda", "temu", "shein", "avito") -> "Покупки"
+            has("music", "spotify", "soundcloud", "deezer", "shazam", "podcast") -> "Музыка"
+            has("youtube", "netflix", "kinopoisk", "okko", "twitch", "video") -> "Видео"
+            else -> when (a.category) {
+                ApplicationInfo.CATEGORY_GAME -> "Игры"
+                ApplicationInfo.CATEGORY_SOCIAL -> "Общение"
+                ApplicationInfo.CATEGORY_AUDIO -> "Музыка"
+                ApplicationInfo.CATEGORY_VIDEO -> "Видео"
+                ApplicationInfo.CATEGORY_IMAGE -> "Фото"
+                ApplicationInfo.CATEGORY_NEWS -> "Новости"
+                ApplicationInfo.CATEGORY_MAPS -> "Поездки и еда"
+                ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Работа"
+                else -> when {
+                    p.startsWith("com.google") -> "Google"
+                    a.isSystem -> "Утилиты"
+                    else -> null
+                }
+            }
+        }
+    }
+
+    /** Разложить приложения с экранов по папкам (как на iPhone). */
+    fun autoFolders() {
+        applyAutoFolders()
+        normalize()
+        savePages()
+    }
+
+    private fun applyAutoFolders() {
+        val map = appMap()
+        val items = pages.flatten()
+        val loose = items.filter { !it.startsWith(FOLDER_PREFIX) }
+        val groups = loose.mapNotNull { k -> map[k]?.let { a -> bucket(a)?.let { it to k } } }
+            .groupBy({ it.first }, { it.second })
+            .filter { it.value.size >= 2 }
+        if (groups.isEmpty()) return
+        val newFolders = folders.toMutableMap()
+        val created = mutableListOf<String>()
+        groups.toSortedMap().forEach { (name, keys) ->
+            val existing = newFolders.values.firstOrNull { it.name == name }
+            if (existing != null) {
+                newFolders[existing.id] = existing.copy(apps = existing.apps + keys)
+            } else {
+                val id = FOLDER_PREFIX + System.nanoTime()
+                newFolders[id] = Folder(id, name, keys)
+                created += id
+            }
+        }
+        val grouped = groups.values.flatten().toSet()
+        folders = newFolders
+        val folderItems = items.filter { it.startsWith(FOLDER_PREFIX) }
+        pages = listOf(folderItems + created + loose.filter { it !in grouped })
+    }
+
     fun renameFolder(id: String, name: String) {
         val f = folders[id] ?: return
         folders = folders + (id to f.copy(name = name))
@@ -475,6 +549,55 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         if (cleaned != pages) { pages = cleaned; savePages() }
     }
 
+    // ---------- Секретная папка ----------
+
+    fun saveSecretPin(pin: String?) {
+        secretPin = pin
+        if (pin == null) storage.putString("secretPin", "") else storage.putString("secretPin", pin)
+    }
+
+    // ---------- Местоположение для погоды ----------
+
+    @android.annotation.SuppressLint("MissingPermission")
+    suspend fun detectCity(): com.vse.launcher.util.City? = withContext(Dispatchers.IO) {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val providers = listOf(
+            android.location.LocationManager.NETWORK_PROVIDER,
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.LocationManager.PASSIVE_PROVIDER,
+        )
+        var loc = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        if (loc == null) {
+            val provider = providers.firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+            if (provider != null) {
+                loc = kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                        if (android.os.Build.VERSION.SDK_INT >= 30) {
+                            lm.getCurrentLocation(provider, null, ctx.mainExecutor) { l -> if (cont.isActive) cont.resumeWith(Result.success(l)) }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            lm.requestSingleUpdate(provider, { l -> if (cont.isActive) cont.resumeWith(Result.success(l)) }, android.os.Looper.getMainLooper())
+                        }
+                    }
+                }
+            }
+        }
+        val l = loc ?: return@withContext null
+        val name = runCatching {
+            @Suppress("DEPRECATION")
+            android.location.Geocoder(ctx, java.util.Locale("ru")).getFromLocation(l.latitude, l.longitude, 1)?.firstOrNull()?.locality
+        }.getOrNull() ?: Weather.KZ_CITIES.minByOrNull {
+            val r = FloatArray(1)
+            android.location.Location.distanceBetween(l.latitude, l.longitude, it.lat, it.lon, r)
+            r[0]
+        }?.takeIf {
+            val r = FloatArray(1)
+            android.location.Location.distanceBetween(l.latitude, l.longitude, it.lat, it.lon, r)
+            r[0] < 60_000
+        }?.name ?: "Моё местоположение"
+        com.vse.launcher.util.City(name, l.latitude, l.longitude, "")
+    }
+
     // ---------- Настройки ----------
 
     fun updateSettings(transform: (Settings) -> Settings) {
@@ -491,7 +614,9 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         if (!settings.showWeather || weatherLoading) return
         weatherLoading = true
         viewModelScope.launch {
-            Weather.fetch(settings.weatherLat, settings.weatherLon)?.let { weather = it }
+            val w = Weather.fetch(settings.weatherLat, settings.weatherLon)
+            if (w != null) { weather = w; weatherError = null }
+            else weatherError = "Не удалось загрузить погоду. Проверьте интернет и нажмите «Обновить»."
             weatherLoading = false
         }
     }

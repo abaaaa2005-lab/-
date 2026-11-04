@@ -100,7 +100,10 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
             ClickRow(Icons.Default.TravelExplore, "Поисковик", SEARCH_ENGINES.getOrElse(s.searchEngine) { SEARCH_ENGINES[0] }.first) { engineDialog = true }
 
             SectionTitle("Приложения")
-            ClickRow(Icons.Default.VisibilityOff, "Скрытые приложения", "${vm.hidden.size} скрыто") { open(Screen.HiddenApps) }
+            ClickRow(Icons.Default.Lock, "Секретная папка", "${vm.hidden.size} приложений · по PIN-коду") { open(Screen.HiddenApps) }
+            ClickRow(Icons.Default.CreateNewFolder, "Разложить по папкам", "Общение, Финансы, Игры, Фото, Утилиты…") {
+                vm.autoFolders(); SystemActions.toast(ctx, "Готово — приложения разложены по папкам")
+            }
             ClickRow(Icons.Default.RestartAlt, "Сбросить статистику запусков", null) {
                 vm.resetUsage(); SystemActions.toast(ctx, "Статистика сброшена")
             }
@@ -140,19 +143,51 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
 }
 
 @Composable
-private fun CityDialog(vm: LauncherViewModel, onDismiss: () -> Unit) {
+fun CityDialog(vm: LauncherViewModel, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
     var text by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<City>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var searched by remember { mutableStateOf(false) }
+    var locating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    fun choose(c: City) {
+        vm.updateSettings { it.copy(weatherCity = c.name, weatherLat = c.lat, weatherLon = c.lon, showWeather = true) }
+        vm.refreshWeather()
+        onDismiss()
+    }
+    fun detect() {
+        scope.launch {
+            locating = true
+            val c = vm.detectCity()
+            locating = false
+            if (c != null) choose(c) else SystemActions.toast(ctx, "Не удалось определить местоположение — включите геолокацию или выберите город из списка")
+        }
+    }
+    val permission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { ok -> if (ok) detect() else SystemActions.toast(ctx, "Без доступа к геолокации выберите город вручную") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Город") },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                FilledTonalButton(
+                    onClick = {
+                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (granted) detect() else permission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.MyLocation, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (locating) "Определяю…" else "Определить автоматически")
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(text, { text = it }, singleLine = true, modifier = Modifier.weight(1f), placeholder = { Text("Например, Казань") })
+                    OutlinedTextField(text, { text = it; searched = false }, singleLine = true, modifier = Modifier.weight(1f), placeholder = { Text("Поиск города") })
                     IconButton({
                         scope.launch {
                             searching = true
@@ -164,16 +199,16 @@ private fun CityDialog(vm: LauncherViewModel, onDismiss: () -> Unit) {
                 }
                 if (searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
                 if (searched && results.isEmpty() && !searching) Text("Ничего не найдено (нужен интернет)", modifier = Modifier.padding(top = 8.dp))
-                results.forEach { c ->
+                val list = if (text.isBlank()) Weather.KZ_CITIES else if (searched) results
+                else Weather.KZ_CITIES.filter { it.name.contains(text.trim(), true) }
+                if (text.isBlank()) Text("Казахстан", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+                list.forEach { c ->
                     Text(
-                        "${c.name}, ${c.country}",
+                        if (c.country.isBlank() || text.isBlank()) c.name else "${c.name}, ${c.country}",
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                vm.updateSettings { it.copy(weatherCity = c.name, weatherLat = c.lat, weatherLon = c.lon) }
-                                onDismiss()
-                            }
+                            .clickable { choose(c) }
                             .padding(vertical = 10.dp, horizontal = 4.dp),
                     )
                 }

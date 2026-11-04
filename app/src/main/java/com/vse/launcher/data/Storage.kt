@@ -13,12 +13,13 @@ class Storage(context: Context) {
         return runCatching {
             val o = JSONObject(s)
             val d = Settings()
+            val old = !o.has("v") // настройки первой версии — подправляем неудачные значения по умолчанию
             Settings(
                 theme = runCatching { ThemeMode.valueOf(o.optString("theme")) }.getOrDefault(d.theme),
                 dynamicColor = o.optBoolean("dynamicColor", d.dynamicColor),
                 accent = o.optLong("accent", d.accent),
                 columns = o.optInt("columns", d.columns),
-                iconSizeDp = o.optInt("iconSizeDp", d.iconSizeDp),
+                iconSizeDp = o.optInt("iconSizeDp", d.iconSizeDp).let { if (old && it >= 52) d.iconSizeDp else it },
                 showLabels = o.optBoolean("showLabels", d.showLabels),
                 wallpaperDim = o.optDouble("wallpaperDim", d.wallpaperDim.toDouble()).toFloat(),
                 use24h = o.optBoolean("use24h", d.use24h),
@@ -28,9 +29,9 @@ class Storage(context: Context) {
                 showTools = o.optBoolean("showTools", d.showTools),
                 showDock = o.optBoolean("showDock", d.showDock),
                 showBattery = o.optBoolean("showBattery", d.showBattery),
-                weatherCity = o.optString("weatherCity", d.weatherCity),
-                weatherLat = o.optDouble("weatherLat", d.weatherLat),
-                weatherLon = o.optDouble("weatherLon", d.weatherLon),
+                weatherCity = o.optString("weatherCity", d.weatherCity).let { if (old && it == "Москва") d.weatherCity else it },
+                weatherLat = if (old && o.optString("weatherCity") == "Москва") d.weatherLat else o.optDouble("weatherLat", d.weatherLat),
+                weatherLon = if (old && o.optString("weatherCity") == "Москва") d.weatherLon else o.optDouble("weatherLon", d.weatherLon),
                 swipeDownMode = o.optInt("swipeDownMode", d.swipeDownMode),
                 showClock = o.optBoolean("showClock", d.showClock),
                 clockSize = o.optDouble("clockSize", d.clockSize.toDouble()).toFloat(),
@@ -50,6 +51,7 @@ class Storage(context: Context) {
 
     fun saveSettings(s: Settings) {
         val o = JSONObject()
+            .put("v", 2)
             .put("theme", s.theme.name)
             .put("dynamicColor", s.dynamicColor)
             .put("accent", s.accent)

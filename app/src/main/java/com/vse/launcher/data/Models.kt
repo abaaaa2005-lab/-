@@ -54,7 +54,7 @@ data class Settings(
     val dynamicColor: Boolean = false,
     val accent: Long = 0xFF6C5CE7,
     val columns: Int = 4,
-    val iconSizeDp: Int = 58,
+    val iconSizeDp: Int = 48,
     val showLabels: Boolean = true,
     val wallpaperDim: Float = 0.15f,
     val use24h: Boolean = true,
@@ -64,9 +64,9 @@ data class Settings(
     val showTools: Boolean = true,
     val showDock: Boolean = true,
     val showBattery: Boolean = true,
-    val weatherCity: String = "Москва",
-    val weatherLat: Double = 55.7558,
-    val weatherLon: Double = 37.6173,
+    val weatherCity: String = "Алматы",
+    val weatherLat: Double = 43.2389,
+    val weatherLon: Double = 76.8897,
     val swipeDownMode: Int = 0,          // 0 — поиск, 1 — уведомления, 2 — ничего
     val doubleTapLock: Boolean = false,
     // Часы

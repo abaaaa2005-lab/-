@@ -92,7 +92,7 @@ fun LauncherRoot(
                 Screen.Tools -> ToolsHub(vm, onBack = pop, open = push)
                 is Screen.Tool -> ToolScreen(screen.id, vm, onBack = pop)
                 Screen.Settings -> SettingsScreen(vm, onBack = pop, open = push)
-                Screen.HiddenApps -> HiddenAppsScreen(vm, onBack = pop)
+                Screen.HiddenApps -> SecretScreen(vm, onBack = pop)
             }
         }
     }

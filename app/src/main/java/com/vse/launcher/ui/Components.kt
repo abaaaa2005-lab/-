@@ -73,7 +73,7 @@ fun AppIcon(
             }
             if (showLabel) {
                 Spacer(Modifier.height(4.dp))
-                val style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp)
+                val style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp)
                 Text(
                     app.label,
                     style = if (onWallpaper) style.onWallpaper() else style,
@@ -115,7 +115,8 @@ fun AppMenu(
         }
         if (onEdit != null) MenuItem("Изменить экран «Домой»", Icons.Default.Edit) { onDismiss(); onEdit() }
         MenuItem("Переименовать", Icons.Default.DriveFileRenameOutline) { onDismiss(); onRename() }
-        MenuItem("Скрыть", Icons.Default.VisibilityOff) { vm.setHidden(app, true); onDismiss() }
+        if (app.key in vm.hidden) MenuItem("Вернуть из секретной папки", Icons.Default.LockOpen) { vm.setHidden(app, false); onDismiss() }
+        else MenuItem("В секретную папку", Icons.Default.Lock) { vm.setHidden(app, true); onDismiss() }
         MenuItem("О приложении", Icons.Default.Info) { vm.openAppInfo(app); onDismiss() }
         if (!app.isSystem) MenuItem("Удалить", Icons.Default.Delete) { vm.uninstall(app); onDismiss() }
     }

@@ -185,7 +185,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
 
     val apps = remember(vm.allApps, vm.renamed) { vm.appMap() }
     val iconSize = s.iconSizeDp.dp
-    val cellH = iconSize + (if (s.showLabels) 20.dp else 0.dp) + 14.dp
+    val cellH = iconSize + (if (s.showLabels) 18.dp else 0.dp) + 22.dp
     var clockHeightPx by remember { mutableIntStateOf(0) }
 
     // Пока приложения грузятся, экранов ещё нет — как только появятся, встаём на первый
@@ -417,6 +417,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         vm.addPage()
                         scope.launch { pager.animateScrollToPage(vm.pages.size) }
                     },
+                    onAutoFolders = { vm.autoFolders() },
                     onWallpaper = { SystemActions.pickWallpaper(ctx) },
                     onSettings = { open(Screen.Settings) },
                     onDone = { vm.exitEditMode() },
@@ -665,7 +666,7 @@ private fun HomeIcon(
             Spacer(Modifier.height(5.dp))
             Text(
                 label,
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp).onWallpaper(),
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp).onWallpaper(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -891,14 +892,15 @@ private fun PageDots(count: Int, current: Int) {
 }
 
 @Composable
-private fun EditBar(onAddPage: () -> Unit, onWallpaper: () -> Unit, onSettings: () -> Unit, onDone: () -> Unit) {
+private fun EditBar(onAddPage: () -> Unit, onAutoFolders: () -> Unit, onWallpaper: () -> Unit, onSettings: () -> Unit, onDone: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GlassButton(Icons.Default.Add, "Экран", onAddPage)
-        GlassButton(Icons.Default.Wallpaper, "Обои", onWallpaper)
+        GlassButton(Icons.Default.CreateNewFolder, "Папки", onAutoFolders)
+        GlassButton(Icons.Default.Wallpaper, null, onWallpaper)
         GlassButton(Icons.Default.Settings, null, onSettings)
         Spacer(Modifier.weight(1f))
         Box(
@@ -1034,7 +1036,10 @@ private fun TodayPage(vm: LauncherViewModel, open: (Screen) -> Unit) {
             Widget(onClick = { open(Screen.Tool(ToolId.WEATHER)) }) {
                 Text(s.weatherCity, style = MaterialTheme.typography.titleSmall.onWallpaper())
                 if (w == null) {
-                    Text(if (vm.weatherLoading) "Загрузка…" else "Нет данных", style = MaterialTheme.typography.bodyMedium.onWallpaper())
+                    Text(
+                        if (vm.weatherLoading) "Загрузка…" else (vm.weatherError ?: "Нет данных") + "\nНажмите, чтобы открыть",
+                        style = MaterialTheme.typography.bodyMedium.onWallpaper(),
+                    )
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${w.temp.roundToInt()}°", style = TextStyle(fontSize = 48.sp, fontWeight = FontWeight.Light).onWallpaper())
