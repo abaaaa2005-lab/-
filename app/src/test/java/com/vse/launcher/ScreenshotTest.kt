@@ -94,6 +94,15 @@ class ScreenshotTest {
     @Test fun outlineClock() = shoot("outlineclock") { _, vm ->
         vm.updateSettings { it.copy(clockSize = 120f, clockScaleX = 0.7f, clockScaleY = 1.8f, clockStyle = 1, clockAlign = 0) }
     }
+    @Test fun selection() {
+        com.vse.launcher.ui.jiggleAnimation = false
+        try {
+            shoot("selection") { _, vm ->
+                vm.editMode = true
+                vm.selection.addAll(listOf("com.spotify.music/cls", "com.notes.app/cls", "com.game.one/cls"))
+            }
+        } finally { com.vse.launcher.ui.jiggleAnimation = true }
+    }
     @Test fun bigFolder() = shoot("bigfolder") { _, vm ->
         vm.folders.values.filter { it.apps.size >= 4 }.take(2).forEach { vm.toggleFolderBig(it.id) }
     }

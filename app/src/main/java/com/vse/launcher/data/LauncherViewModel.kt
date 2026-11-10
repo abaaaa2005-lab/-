@@ -78,6 +78,8 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var editMode by mutableStateOf(false)
     var homeSignal by mutableStateOf(0)
+    /** Иконки, выбранные в режиме редактирования (чтобы двигать сразу несколько). */
+    val selection = androidx.compose.runtime.mutableStateListOf<String>()
     private var homeInitialized = storage.loadPages() != null
     private var known = storage.loadStringList("known").toSet()
     private var rowsFirst = 0
@@ -468,6 +470,41 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         normalize()
         savePages()
     }
+
+    // ---------- Несколько иконок сразу ----------
+
+    /** Поставить остальные иконки группы сразу после главной (после перетаскивания стопки). */
+    fun moveGroupAfter(primary: String, others: List<String>) {
+        val os = others.filter { it != primary }.distinct()
+        if (os.isEmpty()) return
+        // Сначала убираем всю стопку, потом вставляем подряд за главной иконкой
+        os.forEach { removeEverywhere(it) }
+        when (val loc = locate(primary) ?: return) {
+            is Target.Page -> pages = pages.mapIndexed { i, p ->
+                if (i == loc.page) p.toMutableList().apply { addAll(loc.index + 1, os) } else p
+            }
+            is Target.Dock -> {
+                val room = (DOCK_MAX - dock.size).coerceAtLeast(0)
+                dock = dock.toMutableList().apply { addAll(loc.index + 1, os.take(room)) }
+                val rest = os.drop(room)
+                if (rest.isNotEmpty()) pages = pages.mapIndexed { i, p -> if (i == 0) p + rest else p }.ifEmpty { listOf(rest) }
+            }
+        }
+        normalize()
+        savePages()
+    }
+
+    /** Бросили стопку на иконку — все приложения в одну папку. */
+    fun mergeGroup(ids: List<String>, targetId: String) {
+        val apps = ids.filter { !it.startsWith(FOLDER_PREFIX) && it != targetId }
+        if (apps.isEmpty()) return
+        mergeInto(apps.first(), targetId)
+        val folderId = if (targetId.startsWith(FOLDER_PREFIX)) targetId
+        else foldersHere().firstOrNull { targetId in it.apps && apps.first() in it.apps }?.id ?: return
+        apps.drop(1).forEach { moveToFolder(it, folderId) }
+    }
+
+    fun removeManyFromHome(ids: List<String>) = ids.forEach { removeFromHome(it) }
 
     // ---------- Секретные столы ----------
 

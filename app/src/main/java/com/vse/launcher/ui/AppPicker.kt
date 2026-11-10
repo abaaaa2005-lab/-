@@ -119,35 +119,42 @@ fun AppPickerDialog(
 
 /** «Переместить…» — куда отправить иконку без перетаскивания. */
 @Composable
-fun MoveDialog(vm: LauncherViewModel, id: String, currentPage: Int, onDismiss: () -> Unit) {
-    val isFolder = id.startsWith(FOLDER_PREFIX)
-    val name = if (isFolder) vm.folders[id]?.name else vm.appMap()[id]?.label
-    val foldersHere = vm.pages.flatten().filter { it.startsWith(FOLDER_PREFIX) && it != id }.mapNotNull { vm.folders[it] }
+fun MoveDialog(vm: LauncherViewModel, id: String, currentPage: Int, onDismiss: () -> Unit) =
+    MoveDialog(vm, listOf(id), currentPage, onDismiss)
+
+/** «Переместить…» для нескольких иконок сразу. */
+@Composable
+fun MoveDialog(vm: LauncherViewModel, ids: List<String>, currentPage: Int, onDismiss: () -> Unit) {
+    val id = ids.first()
+        val anyApp = ids.any { !it.startsWith(FOLDER_PREFIX) }
+    val name = if (ids.size > 1) null else if (id.startsWith(FOLDER_PREFIX)) vm.folders[id]?.name else vm.appMap()[id]?.label
+    val foldersHere = vm.pages.flatten().filter { it.startsWith(FOLDER_PREFIX) && it !in ids }.mapNotNull { vm.folders[it] }
+    fun each(f: (String) -> Unit) { ids.forEach(f); onDismiss() }
     val otherDesktops = vm.desktops.filter { it.id != vm.activeDesktop && (!it.secret || vm.secretUnlocked) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Переместить «${name ?: ""}»") },
+        title = { Text(if (name != null) "Переместить «$name»" else "Переместить ${ids.size} шт.") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                 Text("Экран", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 vm.pages.indices.forEach { i ->
                     MoveRow(Icons.Default.Smartphone, "Экран ${i + 1}" + if (i == currentPage) " (этот)" else "") {
-                        vm.moveToPage(id, i); onDismiss()
+                        each { vm.moveToPage(it, i) }
                     }
                 }
-                MoveRow(Icons.Default.AddToPhotos, "Новый экран") { vm.moveToPage(id, vm.pages.size); onDismiss() }
-                if (!isFolder && foldersHere.isNotEmpty()) {
+                MoveRow(Icons.Default.AddToPhotos, "Новый экран") { val p = vm.pages.size; each { vm.moveToPage(it, p) } }
+                if (anyApp && foldersHere.isNotEmpty()) {
                     Text("В папку", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 10.dp))
                     foldersHere.forEach { f ->
-                        MoveRow(Icons.Default.Folder, f.name) { vm.moveToFolder(id, f.id); onDismiss() }
+                        MoveRow(Icons.Default.Folder, f.name) { each { vm.moveToFolder(it, f.id) } }
                     }
                 }
                 if (otherDesktops.isNotEmpty()) {
                     Text("На другой рабочий стол", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 10.dp))
                     otherDesktops.forEach { d ->
                         MoveRow(if (d.secret) Icons.Default.Lock else Icons.Default.DesktopWindows, d.name) {
-                            vm.moveToDesktop(id, d.id); onDismiss()
+                            each { vm.moveToDesktop(it, d.id) }
                         }
                     }
                 }

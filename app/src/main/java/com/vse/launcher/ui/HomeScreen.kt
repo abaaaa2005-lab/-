@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -162,6 +163,8 @@ private class HomeActions(
     val longPressMove: (Offset) -> Unit,
     val longPressEnd: () -> Unit,
     val verticalSwipe: (Float) -> Unit,
+    /** Нажатие другим пальцем, пока тащим стопку — добавить иконку в стопку. */
+    val extraTap: (Offset) -> Unit,
 )
 
 // ======================================================================
@@ -182,6 +185,11 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
 
     // Перетаскивание
     var dragId by remember { mutableStateOf<String?>(null) }
+    // Выбранные иконки (режим редактирования) и стопка, которую тащим
+    val selected = vm.selection
+    var dragGroup by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(vm.editMode) { if (!vm.editMode) selected.clear() }
+    var moveMany by remember { mutableStateOf<List<String>?>(null) }
     var dragPos by remember { mutableStateOf(Offset.Zero) }
     var mergeTarget by remember { mutableStateOf<String?>(null) }
     var pressedId by remember { mutableStateOf<String?>(null) }
@@ -331,8 +339,13 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                         val badge = with(density) { 26.dp.toPx() }
                         val onBadge = icon != null && pos.x < icon.left + badge && pos.y < icon.top + badge
                         if (onBadge) {
-                            if (id.startsWith(FOLDER_PREFIX)) confirmFolderDelete = id else vm.removeFromHome(id)
-                        } else if (id.startsWith(FOLDER_PREFIX)) openFolderAt(id)
+                            if (id.startsWith(FOLDER_PREFIX)) confirmFolderDelete = id else { vm.removeFromHome(id); selected.remove(id) }
+                        } else if (id.startsWith(FOLDER_PREFIX) && selected.isEmpty()) openFolderAt(id)
+                        else {
+                            // Нажатие в режиме редактирования — выбрать / снять выбор
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (id in selected) selected.remove(id) else selected.add(id)
+                        }
                     }
                     id.startsWith(FOLDER_PREFIX) -> {
                         // В большой папке приложения запускаются прямо с рабочего стола
@@ -366,13 +379,22 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     menuFor = null
                     vm.editMode = true
                     dragId = pid
+                    // Если тащим выбранную иконку — едут все выбранные
+                    dragGroup = if (pid in selected) listOf(pid) + selected.filter { it != pid } else listOf(pid)
                 }
                 if (dragId != null) updateHover(pos)
             },
             longPressEnd = {
                 val id = dragId
                 if (id != null) {
-                    mergeTarget?.let { vm.mergeInto(id, it) }
+                    val group = dragGroup
+                    val target = mergeTarget
+                    if (target != null) {
+                        if (group.size > 1) vm.mergeGroup(group, target) else vm.mergeInto(id, target)
+                    } else if (group.size > 1) {
+                        vm.moveGroupAfter(id, group.drop(1))
+                    }
+                    if (group.size > 1) selected.clear()
                 } else {
                     val pid = pressedId
                     if (pid != null) {
@@ -381,10 +403,21 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     }
                 }
                 dragId = null
+                dragGroup = emptyList()
                 pressedId = null
                 mergeTarget = null
                 gestureLock = false
                 edge = 0
+            },
+            extraTap = { pos ->
+                // Второй палец: добавить иконку в стопку, как на iPhone
+                if (dragId != null) {
+                    val id = hitSlot(pos)?.let { slotItem(it) }
+                    if (id != null && id !in dragGroup) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        dragGroup = dragGroup + id
+                    }
+                }
             },
             verticalSwipe = { dy ->
                 if (vm.editMode || pager.currentPage == 0) return@HomeActions
@@ -438,6 +471,9 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                             actions.value.longPress(start)
                             while (true) {
                                 val ev = awaitPointerEvent()
+                                ev.changes.filter { it.id != down.id && it.changedToDown() }.forEach {
+                                    actions.value.extraTap(it.position); it.consume()
+                                }
                                 val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                                 if (c.changedToUp() || !c.pressed) break
                                 actions.value.longPressMove(c.position)
@@ -523,7 +559,8 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                                 columns = s.columns,
                                 apps = apps,
                                 hits = hits,
-                                dragId = dragId,
+                                hiddenIds = dragGroup.toSet(),
+                                selectedIds = selected.toSet(),
                                 mergeTarget = mergeTarget,
                                 modifier = Modifier.weight(1f),
                             )
@@ -558,9 +595,25 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                 }
             }
 
+            if (vm.editMode && dragId == null) {
+                SelectionBar(
+                    count = selected.size,
+                    onMove = { moveMany = selected.toList() },
+                    onFolder = {
+                        vm.createFolder(selected.filter { !it.startsWith(FOLDER_PREFIX) }, (pager.currentPage - 1).coerceAtLeast(0))
+                        selected.clear()
+                    },
+                    onRemove = { vm.removeManyFromHome(selected.toList()); selected.clear() },
+                    onSelectAll = {
+                        val page = vm.pages.getOrNull(pager.currentPage - 1) ?: emptyList()
+                        page.forEach { if (it !in selected) selected.add(it) }
+                    },
+                    onClear = { selected.clear() },
+                )
+            }
             PageDots(pager.pageCount, pager.currentPage)
             if (s.showDock && (vm.dock.isNotEmpty() || vm.editMode)) {
-                Dock(vm, apps, hits, dragId, mergeTarget)
+                Dock(vm, apps, hits, dragGroup.toSet(), selected.toSet(), mergeTarget)
             } else {
                 hits.dock = Rect.Zero
             }
@@ -572,7 +625,21 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
         if (dragging != null) {
             val half = with(density) { (iconSize / 2).toPx() }
             Box(Modifier.offset { IntOffset((dragPos.x - half).roundToInt(), (dragPos.y - half).roundToInt()) }.scale(1.12f)) {
+                // Стопка: остальные иконки выглядывают из-под верхней
+                dragGroup.drop(1).take(3).reversed().forEachIndexed { i, other ->
+                    val k = (minOf(dragGroup.size - 1, 3) - i)
+                    Box(Modifier.offset((k * 5).dp, (k * 5).dp).rotate(k * 4f).alpha(0.9f)) {
+                        HomeIcon(other, apps, vm.folders, iconSize, showLabel = false, forceSmall = true)
+                    }
+                }
                 HomeIcon(dragging, apps, vm.folders, iconSize, showLabel = false, forceSmall = true)
+                if (dragGroup.size > 1) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).offset(10.dp, (-10).dp).size(26.dp).clip(CircleShape)
+                            .background(Color(0xFFFF3B30)),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("${dragGroup.size}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                }
             }
         }
 
@@ -645,6 +712,9 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
     renaming?.let { app -> RenameDialog(app, vm) { renaming = null } }
 
     moveFor?.let { id -> MoveDialog(vm, id, (pager.currentPage - 1).coerceAtLeast(0)) { moveFor = null } }
+    moveMany?.let { ids ->
+        MoveDialog(vm, ids, (pager.currentPage - 1).coerceAtLeast(0)) { moveMany = null; selected.clear() }
+    }
 
     picker?.let { mode ->
         val page = (pager.currentPage - 1).coerceAtLeast(0)
@@ -702,7 +772,8 @@ private fun AppGrid(
     columns: Int,
     apps: Map<String, AppInfo>,
     hits: HitMap,
-    dragId: String?,
+    hiddenIds: Set<String>,
+    selectedIds: Set<String>,
     mergeTarget: String?,
     modifier: Modifier,
 ) {
@@ -739,7 +810,8 @@ private fun AppGrid(
                 HomeIcon(
                     id, apps, vm.folders, s.iconSizeDp.dp, s.showLabels,
                     jiggle = vm.editMode, jigglePhase = p.itemIndex,
-                    hidden = id == dragId,
+                    hidden = id in hiddenIds,
+                    selected = id in selectedIds,
                     highlighted = id == mergeTarget,
                     onIconPositioned = { hits.iconById[id] = it },
                     onInner = { hits.inner[id] = it },
@@ -761,6 +833,7 @@ private fun HomeIcon(
     jiggle: Boolean = false,
     jigglePhase: Int = 0,
     hidden: Boolean = false,
+    selected: Boolean = false,
     highlighted: Boolean = false,
     onIconPositioned: (Rect) -> Unit = {},
     onInner: (List<Pair<String, Rect>>) -> Unit = {},
@@ -817,6 +890,22 @@ private fun HomeIcon(
                         .background(Color(0xE6D0D0D6)),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Default.Remove, "Убрать", tint = Color.Black, modifier = Modifier.size(16.dp)) }
+            }
+            if (selected) {
+                // Выбрана: синяя галочка и подсветка
+                Box(Modifier.matchParentSize().clip(RoundedCornerShape(24)).background(Color(0x33007AFF)))
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(6.dp, (-6).dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .padding(2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF007AFF)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(15.dp)) }
             }
         }
         if (showLabel) {
@@ -1110,7 +1199,7 @@ private fun SwitchLine(title: String, checked: Boolean, onChange: (Boolean) -> U
 // ======================================================================
 
 @Composable
-private fun Dock(vm: LauncherViewModel, apps: Map<String, AppInfo>, hits: HitMap, dragId: String?, mergeTarget: String?) {
+private fun Dock(vm: LauncherViewModel, apps: Map<String, AppInfo>, hits: HitMap, hiddenIds: Set<String>, selectedIds: Set<String>, mergeTarget: String?) {
     val s = vm.settings
     Row(
         Modifier
@@ -1141,11 +1230,63 @@ private fun Dock(vm: LauncherViewModel, apps: Map<String, AppInfo>, hits: HitMap
                 HomeIcon(
                     id, apps, vm.folders, s.iconSizeDp.dp, showLabel = false,
                     jiggle = vm.editMode, jigglePhase = i + 1,
-                    hidden = id == dragId, highlighted = id == mergeTarget,
+                    hidden = id in hiddenIds, selected = id in selectedIds, highlighted = id == mergeTarget,
                     onIconPositioned = { hits.iconById[id] = it },
                 )
             }
         }
+    }
+}
+
+/** Панель для выбранных иконок (режим редактирования). */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    onMove: () -> Unit,
+    onFolder: () -> Unit,
+    onRemove: () -> Unit,
+    onSelectAll: () -> Unit,
+    onClear: () -> Unit,
+) {
+    if (count == 0) {
+        Text(
+            "Нажимайте на иконки, чтобы выбрать сразу несколько",
+            style = MaterialTheme.typography.bodySmall.onWallpaper(),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onSelectAll).padding(top = 6.dp),
+        )
+        return
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(22.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Выбрано: $count", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("Все на экране", color = Color(0xFF64B5F6), modifier = Modifier.clickable(onClick = onSelectAll).padding(6.dp))
+            Icon(Icons.Default.Close, "Снять выбор", tint = Color.White, modifier = Modifier.clickable(onClick = onClear).padding(6.dp))
+        }
+        Text(
+            "Потяните любую выбранную — поедут все вместе",
+            color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SelAction(Icons.Default.OpenWith, "Переместить", Modifier.weight(1f), onMove)
+            SelAction(Icons.Default.CreateNewFolder, "В папку", Modifier.weight(1f), onFolder)
+            SelAction(Icons.Default.RemoveCircleOutline, "Убрать", Modifier.weight(1f), onRemove)
+        }
+    }
+}
+
+@Composable
+private fun SelAction(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Glass).clickable(onClick = onClick).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Text(text, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 
