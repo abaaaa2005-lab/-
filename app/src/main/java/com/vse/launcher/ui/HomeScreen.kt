@@ -513,6 +513,7 @@ fun HomeScreen(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     onDesktops = { taskView = true },
                     onWallpaper = { SystemActions.pickWallpaper(ctx) },
                     onSettings = { open(Screen.Settings) },
+                    onBuddy = { open(Screen.Buddy) },
                     onDone = { vm.exitEditMode() },
                 )
             } else if (vm.desktops.count { !it.secret || vm.secretUnlocked } > 1 || desktop.secret) {
@@ -1327,6 +1328,7 @@ private fun EditBar(
     onDesktops: () -> Unit,
     onWallpaper: () -> Unit,
     onSettings: () -> Unit,
+    onBuddy: () -> Unit,
     onDone: () -> Unit,
 ) {
     var more by remember { mutableStateOf(false) }
@@ -1346,6 +1348,7 @@ private fun EditBar(
                 DropdownMenuItem({ Text("Рабочие столы") }, { more = false; onDesktops() }, leadingIcon = { Icon(Icons.Default.DesktopWindows, null) })
                 DropdownMenuItem({ Text("Обои телефона") }, { more = false; onWallpaper() }, leadingIcon = { Icon(Icons.Default.Wallpaper, null) })
                 DropdownMenuItem({ Text("Настройки") }, { more = false; onSettings() }, leadingIcon = { Icon(Icons.Default.Settings, null) })
+                DropdownMenuItem({ Text("Помощник Дружок") }, { more = false; onBuddy() }, leadingIcon = { Icon(Icons.Default.Face, null) })
             }
         }
         Spacer(Modifier.weight(1f))
@@ -1558,6 +1561,23 @@ private fun TodayPage(vm: LauncherViewModel, open: (Screen) -> Unit) {
                     tint = Color.White, modifier = Modifier.size(56.dp).align(Alignment.CenterHorizontally),
                 )
                 Text(if (vm.torchOn) "Включён" else "Выключен", style = MaterialTheme.typography.labelSmall.onWallpaper(), modifier = Modifier.align(Alignment.CenterHorizontally))
+            }
+        }
+
+        // Помощник Дружок
+        Widget(onClick = { open(Screen.Buddy) }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                com.vse.launcher.buddy.BuddyCharacter(
+                    com.vse.launcher.buddy.BuddyState.look, com.vse.launcher.buddy.Emotion.HAPPY, false, Modifier.size(56.dp), animate = false,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Помощник ${com.vse.launcher.buddy.BuddyState.look.name}", style = MaterialTheme.typography.titleSmall.onWallpaper())
+                    Text(
+                        if (com.vse.launcher.buddy.BuddyState.running) "Сидит в углу экрана" else "Нажмите, чтобы настроить и запустить",
+                        style = MaterialTheme.typography.bodyMedium.onWallpaper(),
+                    )
+                }
             }
         }
 

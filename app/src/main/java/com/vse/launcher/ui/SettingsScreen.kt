@@ -48,11 +48,29 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
 
     ScreenScaffold("Настройки лаунчера", onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
+            // Помощник — на самом видном месте
+            Card(
+                onClick = { open(Screen.Buddy) },
+                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    com.vse.launcher.buddy.BuddyCharacter(
+                        com.vse.launcher.buddy.BuddyState.look, com.vse.launcher.buddy.Emotion.HAPPY, false, Modifier.size(64.dp), animate = false,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Помощник ${com.vse.launcher.buddy.BuddyState.look.name}", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Text("Живой персонаж в углу экрана: видит экран, говорит, шапки и наушники", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.White)
+                }
+            }
+
             SectionTitle("Основное")
             ClickRow(Icons.Default.Home, "Сделать лаунчером по умолчанию", "Выберите «Всё Лаунчер» в списке") { SystemActions.setDefaultLauncher(ctx) }
             ClickRow(Icons.Default.Wallpaper, "Обои", "Выбрать картинку рабочего стола") { SystemActions.pickWallpaper(ctx) }
             ClickRow(Icons.Default.Person, "Ваше имя", s.userName.ifBlank { "Для приветствия" }) { nameDialog = true }
-            ClickRow(Icons.Default.Face, "Помощник ${com.vse.launcher.buddy.BuddyState.look.name}", "Живой персонаж в углу экрана: видит экран, говорит, шапки и наушники") { open(Screen.Buddy) }
 
             SectionTitle("Внешний вид")
             ClickRow(Icons.Default.DarkMode, "Тема", s.theme.title) { themeDialog = true }
@@ -115,7 +133,7 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
             ClickRow(Icons.Default.Refresh, "Обновить список приложений", "${vm.allApps.size} приложений") { vm.reloadApps() }
 
             SectionTitle("О лаунчере")
-            InfoRow("Всё Лаунчер 1.0 — рабочий стол, поиск, погода, заметки, задачи, калькулятор, фонарик, таймеры, компас, уровень, конвертер и многое другое. Без рекламы и сбора данных.")
+            InfoRow("Всё Лаунчер ${runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: ""} — рабочий стол, поиск, погода, заметки, задачи, калькулятор, фонарик, таймеры, компас, уровень, конвертер и многое другое. Без рекламы и сбора данных.")
         }
     }
 

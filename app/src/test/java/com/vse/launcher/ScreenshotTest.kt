@@ -61,10 +61,11 @@ class ScreenshotTest {
         }
     }
 
-    private fun shoot(name: String, setup: (MainActivity, LauncherViewModel) -> Unit = { _, _ -> }) {
-        androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
-            .getSharedPreferences("vse_launcher", 0).edit().clear().commit()
-        val scenario = ActivityScenario.launch(MainActivity::class.java)
+    private fun shoot(name: String, buddy: Boolean = false, setup: (MainActivity, LauncherViewModel) -> Unit = { _, _ -> }) {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        app.getSharedPreferences("vse_launcher", 0).edit().clear().commit()
+        val intent = android.content.Intent(app, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_BUDDY, buddy)
+        val scenario = ActivityScenario.launch<MainActivity>(intent)
         scenario.onActivity { act ->
             val vm = ViewModelProvider(act)[LauncherViewModel::class.java]
             vm.setAppsForTest(fakeApps())
@@ -84,6 +85,7 @@ class ScreenshotTest {
     }
 
     @Test fun home() = shoot("home")
+    @Test fun buddySettings() = shoot("buddy_settings", buddy = true)
     @Test fun editMode() {
         com.vse.launcher.ui.jiggleAnimation = false
         try { shoot("edit") { _, vm -> vm.editMode = true } } finally { com.vse.launcher.ui.jiggleAnimation = true }

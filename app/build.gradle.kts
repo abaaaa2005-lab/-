@@ -12,17 +12,31 @@ android {
         applicationId = "com.vse.launcher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1 с Дружком"
     }
 
+    // Постоянный ключ (если лежит рядом, в git не хранится): новые версии ставятся поверх старых
+    val keystore = file("vse-launcher.keystore")
+    signingConfigs {
+        create("vse") {
+            storeFile = keystore
+            storePassword = "vselauncher"
+            keyAlias = "vse"
+            keyPassword = "vselauncher"
+        }
+    }
+    val sign = if (keystore.exists()) signingConfigs.getByName("vse") else signingConfigs.getByName("debug")
+
     buildTypes {
+        debug {
+            signingConfig = sign
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Подписываем debug-ключом, чтобы release APK можно было сразу установить
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = sign
         }
     }
     compileOptions {

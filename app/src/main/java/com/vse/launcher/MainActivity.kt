@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vm.lockSecret()
+        com.vse.launcher.buddy.BuddyState.load(this)
         registerReceiver(screenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF))
         openBuddyIfAsked(intent)
         setContent {
