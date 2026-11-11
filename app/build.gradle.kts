@@ -51,6 +51,8 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Claude API — помощник «Дружок» смотрит на экран и комментирует
+    implementation("com.anthropic:anthropic-java:3.7.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
