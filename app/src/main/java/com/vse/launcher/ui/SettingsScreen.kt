@@ -52,6 +52,7 @@ fun SettingsScreen(vm: LauncherViewModel, onBack: () -> Unit, open: (Screen) -> 
             ClickRow(Icons.Default.Home, "Сделать лаунчером по умолчанию", "Выберите «Всё Лаунчер» в списке") { SystemActions.setDefaultLauncher(ctx) }
             ClickRow(Icons.Default.Wallpaper, "Обои", "Выбрать картинку рабочего стола") { SystemActions.pickWallpaper(ctx) }
             ClickRow(Icons.Default.Person, "Ваше имя", s.userName.ifBlank { "Для приветствия" }) { nameDialog = true }
+            ClickRow(Icons.Default.Face, "Помощник ${com.vse.launcher.buddy.BuddyState.look.name}", "Живой персонаж в углу экрана: видит экран, говорит, шапки и наушники") { open(Screen.Buddy) }
 
             SectionTitle("Внешний вид")
             ClickRow(Icons.Default.DarkMode, "Тема", s.theme.title) { themeDialog = true }

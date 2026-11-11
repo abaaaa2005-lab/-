@@ -21,6 +21,11 @@ import com.vse.launcher.ui.*
 import com.vse.launcher.ui.tools.ToolScreen
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Открыть настройки помощника (из его меню или уведомления). */
+        const val EXTRA_OPEN_BUDDY = "open_buddy"
+    }
+
     private val vm: LauncherViewModel by viewModels()
     private val stack = mutableStateOf<List<Screen>>(emptyList())
 
@@ -36,6 +41,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         vm.lockSecret()
         registerReceiver(screenOff, android.content.IntentFilter(Intent.ACTION_SCREEN_OFF))
+        openBuddyIfAsked(intent)
         setContent {
             val top = stack.value.lastOrNull()
             LauncherTheme(vm.settings) {
@@ -61,8 +67,16 @@ class MainActivity : ComponentActivity() {
         stack.value = stack.value.dropLast(1)
     }
 
+    private fun openBuddyIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_BUDDY, false) == true) {
+            intent.removeExtra(EXTRA_OPEN_BUDDY)
+            stack.value = listOf(Screen.Buddy)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        openBuddyIfAsked(intent)
         // Нажатие «Домой» — возвращаемся на главный экран
         if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
             stack.value = emptyList()
@@ -118,6 +132,7 @@ fun LauncherRoot(
                 is Screen.Tool -> ToolScreen(screen.id, vm, onBack = pop)
                 Screen.Settings -> SettingsScreen(vm, onBack = pop, open = push)
                 Screen.HiddenApps -> SecretScreen(vm, onBack = pop)
+                Screen.Buddy -> BuddyScreen(onBack = pop)
             }
         }
     }

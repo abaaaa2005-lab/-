@@ -11,6 +11,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -103,8 +106,6 @@ private class BuddyPainter(
     fun draw() = with(ds) {
         drawAuraBack()
         if (look.accessory == 11) drawCape()
-        // Тень под персонажем
-        drawOval(Color.Black.copy(alpha = 0.18f), Offset(cx - 22 * u, 93 * u), s(44f, 5f))
         drawBody()
         if (look.shape == 4 && look.hat !in listOf(4, 11, 12, 21, 24, 29)) drawCatEars()
         drawBelly()
@@ -126,10 +127,12 @@ private class BuddyPainter(
 
     fun DrawScope.drawBody() {
         val path = bodyPath()
-        drawPath(path, Brush.verticalGradient(listOf(lerp(body, White, 0.18f), body, bodyDark), startY = geo.top * u + oy, endY = geo.bottom * u + oy))
-        drawPath(path, Ink.copy(alpha = 0.18f), style = Stroke(1.2f * u))
-        // Блик
-        drawOval(White.copy(alpha = 0.35f), p(-17f, geo.top + 6f), s(10f, 6f))
+        // Плоская заливка и тень-полумесяц снизу справа
+        drawPath(path, bodyDark)
+        clipPath(path) {
+            val lit = Path().apply { addPath(path, Offset(-3.2f * u, -3.2f * u)) }
+            drawPath(lit, body)
+        }
         if (look.shape == 5) { // робот: антенна и болты
             drawLine(Ink, p(0f, geo.top), p(0f, geo.top - 8f), 1.5f * u)
             drawCircle(if (sin(t * 4) > 0) Color(0xFFFF5E5E) else Color(0xFFFFB3B3), 3f * u, p(0f, geo.top - 9f))
@@ -200,7 +203,7 @@ private class BuddyPainter(
     }
 
     fun DrawScope.drawBelly() {
-        if (look.shape == 7) return
+        if (look.shape == 7 || !look.belly) return
         val c = col(look.bellyColor, 180f)
         drawOval(c.copy(alpha = 0.85f), p(-14f, geo.neckY - 6f), s(28f, geo.bottom - geo.neckY + 3f))
     }
@@ -215,13 +218,21 @@ private class BuddyPainter(
 
     // ---------------- Глаза ----------------
 
+    val cartoon get() = look.eyes == 0
+    val face get() = col(look.faceColor, 30f)
+    val eyeInkC get() = if (cartoon) face else col(look.eyeColor, 300f)
+
     fun DrawScope.drawEyes() {
         if (look.glasses == 8) return // VR-шлем закрывает глаза
-        for (side in listOf(-1f, 1f)) drawEye(p(side * 10f, geo.eyeY), side)
+        for (side in listOf(-1f, 1f)) {
+            // У мультяшных глаз правый чуть выше — как на картинке
+            val dy = if (cartoon) (if (side < 0) 1.5f else -2f) else 0f
+            drawEye(p(side * 11f, geo.eyeY + dy), side)
+        }
     }
 
     fun DrawScope.drawEye(c: Offset, side: Float) {
-        val eyeInk = col(look.eyeColor, 300f)
+        val eyeInk = eyeInkC
         when (emo) {
             Emotion.HAPPY -> { arcEye(c, up = true); return }
             Emotion.LAUGHING -> { chevron(c, side); return }
@@ -232,7 +243,7 @@ private class BuddyPainter(
         }
         // Обычный открытый глаз (с учётом стиля и моргания)
         var open = 1f - blink
-        if (look.eyes == 4) open *= 0.45f
+        if (look.eyes == 5) open *= 0.45f
         if (open < 0.18f) { drawLine(eyeInk, c - Offset(4f * u, 0f), c + Offset(4f * u, 0f), 1.4f * u, StrokeCap.Round); return }
         val big = emo == Emotion.SURPRISED || emo == Emotion.SCARED
         val look2 = when (emo) {
@@ -243,30 +254,37 @@ private class BuddyPainter(
         } * u
         withTransform({ scale(1f, open, c) }) {
             when (look.eyes) {
-                1 -> { // аниме
+                0 -> { // мультяшные белые овалы
+                    val w = if (big) 10f else 9f
+                    val h = if (big) 15f else 13.5f
+                    val sh = if (side > 0) 0.5f else 0f
+                    drawOval(face, c - Offset(w / 2 * u, h / 2 * u) + look2 * 0.5f + Offset(sh * u, 0f), s(w, h))
+                    if (big) drawCircle(lerp(body, Ink, 0.6f), 2f * u, c + look2)
+                }
+                2 -> { // аниме
                     drawOval(White, c - Offset(5f * u, 6.5f * u), s(10f, 13f))
                     drawOval(eyeInk, c - Offset(4f * u, 5.5f * u) + look2, s(8f, 11f))
                     drawCircle(Ink, (if (big) 1.5f else 2.6f) * u, c + look2)
                     drawCircle(White, 1.6f * u, c + look2 + Offset(-1.6f * u, -2.6f * u))
                     drawCircle(White, 0.8f * u, c + look2 + Offset(1.5f * u, 2.2f * u))
                 }
-                2 -> drawCircle(eyeInk, (if (big) 3.4f else 2.5f) * u, c + look2 * 0.3f)
-                3 -> {
+                3 -> drawCircle(eyeInk, (if (big) 3.4f else 2.5f) * u, c + look2 * 0.3f)
+                4 -> {
                     drawCircle(White, 8f * u, c); drawCircle(Ink.copy(alpha = 0.25f), 8f * u, c, style = Stroke(0.7f * u))
                     drawCircle(eyeInk, (if (big) 2.6f else 4.8f) * u, c + look2 * 1.4f)
                     drawCircle(White, 1.6f * u, c + look2 * 1.4f + Offset(-1.6f * u, -1.8f * u))
                 }
-                5 -> { // экран робота
+                6 -> { // экран робота
                     val g = lerp(eyeInk, Color(0xFF40F0FF), 0.6f)
                     drawRoundRect(g.copy(alpha = 0.35f), c - Offset(6f * u, 4.5f * u), s(12f, 9f), CornerRadius(2 * u))
                     drawRoundRect(g, c - Offset(4f * u, (if (big) 3.5f else 2.5f) * u) + look2 * 0.5f, s(8f, if (big) 7f else 5f), CornerRadius(1.2f * u))
                 }
-                6 -> {
+                7 -> {
                     drawOval(White, c - Offset(4.5f * u, 7f * u), s(9f, 14f))
                     drawOval(Ink.copy(alpha = 0.3f), c - Offset(4.5f * u, 7f * u), s(9f, 14f), style = Stroke(0.6f * u))
                     drawOval(eyeInk, c - Offset(2.5f * u, 3.5f * u) + look2, s(5f, if (big) 5f else 7f))
                 }
-                7 -> { // пуговки
+                8 -> { // пуговки
                     drawCircle(eyeInk, 5f * u, c); drawCircle(lerp(eyeInk, White, 0.25f), 4f * u, c, style = Stroke(0.6f * u))
                     for (dx in listOf(-1.4f, 1.4f)) for (dy in listOf(-1.4f, 1.4f)) drawCircle(body, 0.8f * u, c + Offset(dx * u, dy * u))
                 }
@@ -286,7 +304,7 @@ private class BuddyPainter(
         // Полуприкрытые веки: круто, ехидно, злость
         if (emo == Emotion.COOL || emo == Emotion.SMUG) {
             drawRect(body, c - Offset(9f * u, 9f * u), s(18f, 8.6f))
-            drawLine(lerp(body, Ink, 0.5f), c - Offset(7f * u, 0.4f * u), c + Offset(7f * u, -0.4f * u), 1.3f * u, StrokeCap.Round)
+            drawLine(if (cartoon) face else lerp(body, Ink, 0.5f), c - Offset(7f * u, 0.4f * u), c + Offset(7f * u, -0.4f * u), 1.3f * u, StrokeCap.Round)
         }
         if (emo == Emotion.ANGRY) {
             val lid = Path().apply {
@@ -308,7 +326,7 @@ private class BuddyPainter(
             moveTo(c.x - 5f * u, c.y + (if (up) 2f else -1f) * u)
             quadraticTo(c.x, c.y + (if (up) -5f else 3f) * u, c.x + 5f * u, c.y + (if (up) 2f else -1f) * u)
         }
-        drawPath(path, col(look.eyeColor, 300f), style = Stroke(1.8f * u, cap = StrokeCap.Round))
+        drawPath(path, eyeInkC, style = Stroke((if (cartoon) 2.4f else 1.8f) * u, cap = StrokeCap.Round))
     }
 
     fun DrawScope.chevron(c: Offset, side: Float) {
@@ -316,13 +334,13 @@ private class BuddyPainter(
         val path = Path().apply {
             moveTo(c.x - d * 4f * u, c.y - 4f * u); lineTo(c.x + d * 3f * u, c.y); lineTo(c.x - d * 4f * u, c.y + 4f * u)
         }
-        drawPath(path, col(look.eyeColor, 300f), style = Stroke(1.8f * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, eyeInkC, style = Stroke((if (cartoon) 2.4f else 1.8f) * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 
     fun DrawScope.drawBrows() {
         if (look.glasses == 8 || look.glasses == 10) return
         val y = geo.eyeY - 9f
-        val c = lerp(body, Ink, 0.75f)
+        val c = if (cartoon) face else lerp(body, Ink, 0.75f)
         fun brow(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(c, p(x1, y1), p(x2, y2), 1.6f * u, StrokeCap.Round)
         when (emo) {
             Emotion.ANGRY -> { brow(-15f, y - 2f, -5f, y + 2f); brow(15f, y - 2f, 5f, y + 2f) }
@@ -336,14 +354,26 @@ private class BuddyPainter(
     // ---------------- Рот ----------------
 
     fun DrawScope.drawMouth() {
-        val m = p(0f, geo.mouthY)
-        val ink = lerp(body, Ink, 0.85f)
+        val m = p(if (cartoon) 2f else 0f, geo.mouthY)
+        val ink = if (cartoon) face else lerp(body, Ink, 0.85f)
         val stroke = Stroke(1.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
         if (talking) {
             val w = when (emo) { Emotion.HAPPY, Emotion.LAUGHING, Emotion.EXCITED -> 9f; Emotion.SAD -> 6f; else -> 7.5f }
             val h = 1.5f + 6f * mouthOpen
             drawOval(Color(0xFF7A1F2B), m - Offset(w / 2 * u, h / 2 * u), s(w, h))
             if (h > 4f) drawOval(Color(0xFFFF7A8A), m + Offset(-w / 4 * u, (h / 2 - 2.2f) * u), s(w / 2, 2f))
+            return
+        }
+        if (cartoon && (emo == Emotion.NEUTRAL || emo == Emotion.HAPPY || emo == Emotion.LOVE)) {
+            val wide = if (emo == Emotion.NEUTRAL) 6.5f else 8.5f
+            val smile = Path().apply {
+                moveTo(m.x - wide * u, m.y - 1.2f * u)
+                quadraticTo(m.x, m.y + 1.4f * u, m.x + wide * u, m.y - 2.6f * u)
+                quadraticTo(m.x + wide * u + 0.6f * u, m.y + (if (emo == Emotion.NEUTRAL) 3f else 5f) * u, m.x - 1f * u, m.y + (if (emo == Emotion.NEUTRAL) 3.4f else 5.5f) * u)
+                quadraticTo(m.x - wide * u, m.y + 3f * u, m.x - wide * u, m.y - 1.2f * u)
+                close()
+            }
+            drawPath(smile, face)
             return
         }
         when (emo) {
@@ -994,7 +1024,7 @@ private class BuddyPainter(
 
     fun DrawScope.drawAuraBack() {
         when (look.aura) {
-            1 -> {
+            2 -> {
                 val k = 1f + sin(t * 2f) * 0.06f
                 drawCircle(Brush.radialGradient(listOf(body.copy(alpha = 0.55f), Color.Transparent), p(0f, 60f), 46f * u * k), 46f * u * k, p(0f, 60f))
             }
@@ -1003,29 +1033,38 @@ private class BuddyPainter(
 
     fun DrawScope.drawAuraFront() {
         when (look.aura) {
-            2 -> for (i in 0..5) {
+            1 -> { // мерцающие четырёхлучевые звёздочки
+                val spots = listOf(-40f to 30f, 33f to 18f, 44f to 52f, -45f to 72f, 38f to 84f, -30f to 10f)
+                spots.forEachIndexed { i, (x, y) ->
+                    val tw = (sin(t * 2.2f + i * 1.7f) + 1f) / 2f
+                    val c = Offset(cx + x * u, y * u)
+                    val rr = (1.2f + tw * 2.2f) * (if (i % 2 == 0) 1f else 0.7f)
+                    drawPath(star4(c, rr), White.copy(alpha = 0.35f + tw * 0.65f))
+                }
+            }
+            3 -> for (i in 0..5) {
                 val a = t * 0.8f + i * PI.toFloat() / 3
                 val tw = (sin(t * 5f + i * 2f) + 1f) / 2f
                 drawPath(star(p(cos(a) * 38f, 58f + sin(a) * 32f), 2.5f + tw * 1.5f, 0.8f, 0f), Gold.copy(alpha = 0.4f + tw * 0.6f))
             }
-            3 -> particles(0.25f, rising = true) { c, k, _ -> drawPath(heart(c, 3.2f), Color(0xFFFF6FB5).copy(alpha = 1f - k)) }
-            4 -> particles(0.18f, rising = false) { c, k, i ->
+            4 -> particles(0.25f, rising = true) { c, k, _ -> drawPath(heart(c, 3.2f), Color(0xFFFF6FB5).copy(alpha = 1f - k)) }
+            5 -> particles(0.18f, rising = false) { c, k, i ->
                 for (a in 0 until 3) rotate(a * 60f + t * 40f + i * 20f, c) {
                     drawLine(White.copy(alpha = 1f - k * 0.5f), c - Offset(2.4f * u, 0f), c + Offset(2.4f * u, 0f), 0.6f * u)
                 }
             }
-            5 -> particles(0.22f, rising = true) { c, k, _ ->
+            6 -> particles(0.22f, rising = true) { c, k, _ ->
                 val col = Ink.copy(alpha = 1f - k)
                 drawOval(col, c - Offset(1.6f * u, 1.1f * u), s(3.2f, 2.3f))
                 drawLine(col, c + Offset(1.4f * u, 0f), c + Offset(1.4f * u, -6f * u), 0.6f * u)
                 drawLine(col, c + Offset(1.4f * u, -6f * u), c + Offset(3.4f * u, -4.5f * u), 0.6f * u)
             }
-            6 -> particles(0.2f, rising = true) { c, k, i ->
+            7 -> particles(0.2f, rising = true) { c, k, i ->
                 val rad = (1.5f + (i % 3)) * u
                 drawCircle(Color(0xFF8ED8FF).copy(alpha = 0.8f - k * 0.6f), rad, c, style = Stroke(0.5f * u))
                 drawCircle(White.copy(alpha = 0.7f - k * 0.5f), rad * 0.3f, c + Offset(-rad * 0.4f, -rad * 0.4f))
             }
-            7 -> for (i in 0..6) {
+            8 -> for (i in 0..6) {
                 val a = t * 0.3f + i * 0.9f
                 val c = p(cos(a * 1.3f + i) * 38f, 55f + sin(a * 1.7f + i * 2f) * 32f)
                 val tw = (sin(t * 4f + i * 1.3f) + 1f) / 2f
@@ -1065,6 +1104,17 @@ private class BuddyPainter(
             if (i == 0) moveTo(x, y) else lineTo(x, y)
         }
         close()
+    }
+
+    fun star4(c: Offset, size: Float): Path {
+        val w = size * u
+        val k = w * 0.22f
+        return Path().apply {
+            moveTo(c.x, c.y - w)
+            quadraticTo(c.x + k, c.y - k, c.x + w, c.y); quadraticTo(c.x + k, c.y + k, c.x, c.y + w)
+            quadraticTo(c.x - k, c.y + k, c.x - w, c.y); quadraticTo(c.x - k, c.y - k, c.x, c.y - w)
+            close()
+        }
     }
 
     fun drop(c: Offset, size: Float): Path {

@@ -10,6 +10,7 @@ sealed interface Screen {
     data class Tool(val id: ToolId) : Screen
     data object Settings : Screen
     data object HiddenApps : Screen
+    data object Buddy : Screen
 }
 
 enum class ToolId(val title: String, val icon: ImageVector, val keywords: String) {

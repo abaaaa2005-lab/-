@@ -31,7 +31,7 @@ enum class Emotion(val key: String, val title: String, val emoji: String) {
 /** Каталоги гардероба. Порядок важен: в настройках хранится индекс. */
 object Wardrobe {
     val shapes = listOf("Круглый", "Капелька", "Кубик", "Призрак", "Котик", "Робот", "Слизень", "Звёздочка")
-    val eyes = listOf("Обычные", "Аниме", "Точки", "Огромные", "Сонные", "Робо-экран", "Овальные", "Пуговки")
+    val eyes = listOf("Мультяшные (как на картинке)", "Обычные", "Аниме", "Точки", "Огромные", "Сонные", "Робо-экран", "Овальные", "Пуговки")
     val hats = listOf(
         "Нет", "Кепка", "Кепка задом", "Шапка с помпоном", "Цилиндр", "Корона", "Колпак волшебника",
         "Ковбойская шляпа", "Праздничный колпак", "Поварской колпак", "Берет", "Шапка Санты",
@@ -52,7 +52,7 @@ object Wardrobe {
         "Бант", "Значок-звезда", "Бандана", "Колокольчик", "Плащ супергероя", "Ошейник с шипами",
     )
     val faces = listOf("Ничего", "Усы", "Веснушки", "Родинка", "Пластырь", "Клыки", "Язычок", "Борода")
-    val auras = listOf("Нет", "Свечение", "Искорки", "Сердечки", "Снежинки", "Ноты", "Пузыри", "Огоньки")
+    val auras = listOf("Нет", "Звёздочки", "Свечение", "Искорки", "Сердечки", "Снежинки", "Ноты", "Пузыри", "Огоньки")
     val personalities = listOf(
         "Добряк" to "добрый, заботливый и поддерживающий друг; радуешься за пользователя и мягко шутишь",
         "Саркастичный" to "саркастичный остряк с сухим юмором; подкалываешь по-дружески, но никогда не грубишь",
@@ -74,7 +74,7 @@ object Wardrobe {
     /** 0 — радуга (переливается). */
     const val RAINBOW = 0L
     val palette = listOf(
-        0xFF6C8CFF, 0xFF4F7DFF, 0xFF3BB2F6, 0xFF2EC4B6, 0xFF34C759, 0xFF9BE15D, 0xFFFFD93D,
+        0xFF4A4A4A, 0xFF6C8CFF, 0xFF4F7DFF, 0xFF3BB2F6, 0xFF2EC4B6, 0xFF34C759, 0xFF9BE15D, 0xFFFFD93D,
         0xFFFFB347, 0xFFFF8A5B, 0xFFFF5E5E, 0xFFFF6FB5, 0xFFE38CFF, 0xFFA66CFF, 0xFF7B5CE0,
         0xFF8D6E63, 0xFFB0BEC5, 0xFFFFFFFF, 0xFF2B2B35, 0xFFFFC0CB, 0xFFC8F7DC, RAINBOW,
     )
@@ -83,22 +83,24 @@ object Wardrobe {
 /** Внешний вид и поведение помощника. */
 data class BuddyLook(
     val name: String = "Дружок",
-    val bodyColor: Long = 0xFF6C8CFF,
+    val bodyColor: Long = 0xFF4A4A4A,
+    val belly: Boolean = false,
     val bellyColor: Long = 0xFFFFFFFF,
+    val faceColor: Long = 0xFFFFFFFF,
     val shape: Int = 0,
     val eyes: Int = 0,
     val eyeColor: Long = 0xFF23233A,
-    val blush: Boolean = true,
-    val hat: Int = 3,
+    val blush: Boolean = false,
+    val hat: Int = 0,
     val hatColor: Long = 0xFFFF5E5E,
-    val headphones: Int = 1,
+    val headphones: Int = 0,
     val phonesColor: Long = 0xFF2B2B35,
     val glasses: Int = 0,
     val glassesColor: Long = 0xFF2B2B35,
     val accessory: Int = 0,
     val accColor: Long = 0xFFFFD93D,
     val face: Int = 0,
-    val aura: Int = 0,
+    val aura: Int = 1,
     val sizeDp: Int = 84,
     val corner: Int = 0,
     val opacity: Float = 1f,
@@ -150,7 +152,9 @@ object BuddyStore {
             BuddyLook(
                 name = o.optString("name", d.name),
                 bodyColor = o.optLong("bodyColor", d.bodyColor),
+                belly = o.optBoolean("belly", d.belly),
                 bellyColor = o.optLong("bellyColor", d.bellyColor),
+                faceColor = o.optLong("faceColor", d.faceColor),
                 shape = o.optInt("shape", d.shape),
                 eyes = o.optInt("eyes", d.eyes),
                 eyeColor = o.optLong("eyeColor", d.eyeColor),
@@ -183,7 +187,7 @@ object BuddyStore {
 
     fun save(ctx: Context, l: BuddyLook) {
         val o = JSONObject()
-            .put("name", l.name).put("bodyColor", l.bodyColor).put("bellyColor", l.bellyColor)
+            .put("name", l.name).put("bodyColor", l.bodyColor).put("belly", l.belly).put("bellyColor", l.bellyColor).put("faceColor", l.faceColor)
             .put("shape", l.shape).put("eyes", l.eyes).put("eyeColor", l.eyeColor).put("blush", l.blush)
             .put("hat", l.hat).put("hatColor", l.hatColor)
             .put("headphones", l.headphones).put("phonesColor", l.phonesColor)
@@ -203,6 +207,7 @@ object BuddyStore {
         fun c() = colors.random().let { if (it == Wardrobe.RAINBOW) 0xFFFFD93D else it }
         return base.copy(
             bodyColor = colors.random(),
+            belly = Math.random() < 0.5,
             bellyColor = listOf(0xFFFFFFFF, 0xFFFFF3D6, 0xFFE8F0FF, 0xFFFFE4EC).random(),
             shape = Wardrobe.shapes.indices.random(),
             eyes = Wardrobe.eyes.indices.random(),
