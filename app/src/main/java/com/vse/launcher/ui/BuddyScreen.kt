@@ -65,7 +65,12 @@ fun BuddyScreen(onBack: () -> Unit) {
         val mpm = ctx.getSystemService(MediaProjectionManager::class.java)
         projection.launch(mpm.createScreenCaptureIntent())
     }
-    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { askScreen() }
+    // Бесплатному режиму запись экрана не нужна
+    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (BuddyState.look.smart && BuddyState.look.apiKey.isNotBlank()) askScreen() else BuddyService.start(ctx, null, null)
+    }
+    val smart = look.smart && look.apiKey.isNotBlank()
+    fun openAccessibility() = ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     fun launchBuddy() {
         if (!Settings.canDrawOverlays(ctx)) {
             ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
@@ -114,19 +119,23 @@ fun BuddyScreen(onBack: () -> Unit) {
                     Text(
                         when {
                             !BuddyState.running -> "${look.name} спит"
+                            !smart -> "${look.name} в углу экрана · бесплатный режим"
                             BuddyState.seeing -> "${look.name} в углу экрана и смотрит 👀"
                             else -> "${look.name} в углу экрана, но экран не видит"
                         },
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    if (look.apiKey.isBlank()) Text(
-                        "Чтобы ${look.name} видел экран и отвечал, вставьте ключ Claude API во вкладке «Поведение».",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error,
-                    )
+                    if (!smart && !BuddyState.watchingApps) {
+                        Text(
+                            "Чтобы ${look.name} знал, какое приложение открыто, и шутил про него, включите в «Спец. возможностях» службу «Всё Лаунчер: блокировка экрана и Дружок». Он видит только название приложения.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        OutlinedButton(::openAccessibility) { Text("Открыть спец. возможности") }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!BuddyState.running) Button(::launchBuddy) { Text("Запустить") }
                         else {
-                            if (!BuddyState.seeing) Button(::askScreen) { Text("Дать зрение") }
+                            if (smart && !BuddyState.seeing) Button(::askScreen) { Text("Дать зрение") }
                             OutlinedButton({ BuddyService.stop(ctx) }) { Text("Выключить") }
                         }
                     }
@@ -166,21 +175,66 @@ fun BuddyScreen(onBack: () -> Unit) {
                     Palette("Животик", look.bellyColor) { c -> set { it.copy(bellyColor = c, belly = true) } }
                 }
                 6 -> {
-                    SwitchRow(Icons.Default.RecordVoiceOver, "Говорить вслух", "Синтез речи Android", look.voice) { v -> set { it.copy(voice = v) } }
-                    SwitchRow(Icons.Default.MusicNote, "Звуки эмоций", "Короткие мелодии на каждую эмоцию", look.chirps) { v -> set { it.copy(chirps = v) } }
-                    Slider2("Высота голоса", look.voicePitch, 0.5f..2f) { v -> set { it.copy(voicePitch = v) } }
-                    Slider2("Скорость речи", look.voiceRate, 0.6f..1.8f) { v -> set { it.copy(voiceRate = v) } }
-                    Button(
-                        { preview = Emotion.HAPPY; voice.chirp(Emotion.HAPPY); voice.say("Привет! Я ${look.name}. Так звучит мой голос.", look) },
-                        Modifier.padding(horizontal = 16.dp),
-                    ) { Icon(Icons.Default.VolumeUp, null); Spacer(Modifier.width(8.dp)); Text("Послушать") }
+                    fun listen(l: BuddyLook = BuddyState.look) {
+                        preview = Emotion.HAPPY
+                        voice.speak("Привет! Я ${l.name}. Так звучит мой голос!", Emotion.HAPPY, l)
+                    }
+                    SectionTitle("Как говорит")
+                    Chips(Wardrobe.voiceModes, look.voiceMode) { i -> set { it.copy(voiceMode = i) }; listen() }
+                    Text(
+                        when (look.voiceMode) {
+                            0 -> "Как персонажи в играх: милые звуки в ритм фразы, а слова — в облачке."
+                            1 -> "Читает фразы вслух голосом телефона. Выберите голос, который нравится больше."
+                            else -> "Только облачко с текстом."
+                        },
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                    if (look.voiceMode == 1) {
+                        SectionTitle("Голос")
+                        if (voice.voices.isEmpty()) Text(
+                            "Русских голосов не найдено. Установите их: «Синтез речи» → Google → «Установить голосовые данные» → Русский.",
+                            style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp),
+                        )
+                        else Chips(voice.voices.map { it.label }, voice.voices.indexOfFirst { it.name == look.voiceName }) { i ->
+                            set { it.copy(voiceName = voice.voices[i].name) }; listen()
+                        }
+                        TextButton(
+                            { runCatching { ctx.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } },
+                            Modifier.padding(horizontal = 8.dp),
+                        ) { Text("Скачать голоса получше (настройки синтеза речи)") }
+                    }
+                    if (look.voiceMode != 2) {
+                        Slider2(if (look.voiceMode == 0) "Высота звуков" else "Высота голоса", look.voicePitch, 0.5f..2f) { v -> set { it.copy(voicePitch = v) } }
+                        Slider2("Скорость", look.voiceRate, 0.6f..1.8f) { v -> set { it.copy(voiceRate = v) } }
+                        TextButton({ set { it.copy(voicePitch = 1f, voiceRate = 1f) }; listen() }, Modifier.padding(horizontal = 8.dp)) { Text("Сбросить высоту и скорость") }
+                        Button({ listen() }, Modifier.padding(horizontal = 16.dp)) {
+                            Icon(Icons.Default.VolumeUp, null); Spacer(Modifier.width(8.dp)); Text("Послушать")
+                        }
+                    }
+                    SwitchRow(Icons.Default.MusicNote, "Звуки эмоций", "Короткая мелодия на каждую эмоцию", look.chirps) { v -> set { it.copy(chirps = v) } }
                 }
                 7 -> {
+                    SectionTitle("Мозг")
+                    Chips(listOf("Бесплатный", "Умный — Claude"), if (look.smart) 1 else 0) { i -> set { it.copy(smart = i == 1) } }
+                    Text(
+                        if (!look.smart) "Работает без интернета и бесплатно: шутит про открытые приложения, время, батарею, отвечает на простые вопросы. Экран не видит."
+                        else "Видит экран и отвечает на любые вопросы. Нужен ключ Claude API — он оплачивается отдельно от подписки Claude.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    )
+                    if (!look.smart) {
+                        SwitchRow(
+                            Icons.Default.Apps, "Знает открытое приложение",
+                            if (BuddyState.watchingApps) "Включено" else "Нажмите и включите службу «Всё Лаунчер … и Дружок»",
+                            BuddyState.watchingApps,
+                        ) { openAccessibility() }
+                    }
                     SectionTitle("Характер")
                     Chips(Wardrobe.personalities.map { it.first }, look.personality) { i -> set { it.copy(personality = i) } }
-                    SectionTitle("Сам комментирует экран")
+                    SectionTitle(if (look.smart) "Сам комментирует экран" else "Сам болтает")
                     Chips(Wardrobe.intervals.map { if (it == 0) "Только по нажатию" else if (it < 60) "раз в $it с" else "раз в ${it / 60} мин" }, Wardrobe.intervals.indexOf(look.interval).coerceAtLeast(0)) { i -> set { it.copy(interval = Wardrobe.intervals[i]) } }
-                    Text(
+                    if (look.smart) Text(
                         "Если экран не изменился, помощник промолчит и не потратит запрос.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp),
@@ -190,7 +244,8 @@ fun BuddyScreen(onBack: () -> Unit) {
                     Slider2("Размер: ${look.sizeDp} dp", look.sizeDp.toFloat(), 56f..140f) { v -> set { it.copy(sizeDp = v.toInt()) } }
                     Slider2("Прозрачность", look.opacity, 0.3f..1f) { v -> set { it.copy(opacity = v) } }
                     Slider2("Облачко висит: ${look.bubbleSeconds} с", look.bubbleSeconds.toFloat(), 3f..20f) { v -> set { it.copy(bubbleSeconds = v.toInt()) } }
-                    SectionTitle("Мозг (Claude)")
+                    if (look.smart) {
+                    SectionTitle("Claude")
                     Chips(Wardrobe.models.map { it.second }, look.model) { i -> set { it.copy(model = i) } }
                     var showKey by remember { mutableStateOf(false) }
                     OutlinedTextField(
@@ -208,6 +263,7 @@ fun BuddyScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp),
                     )
+                    }
                 }
             }
         }

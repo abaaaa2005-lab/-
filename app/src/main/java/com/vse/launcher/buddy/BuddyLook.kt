@@ -69,6 +69,7 @@ object Wardrobe {
         "claude-haiku-5-5" to "Claude Haiku 5.5 — самый быстрый и дешёвый",
     )
     val intervals = listOf(15, 30, 60, 120, 300, 0) // 0 — только по нажатию
+    val voiceModes = listOf("Мультяшный лепет", "Голос телефона", "Без голоса")
     val corners = listOf("Справа внизу", "Слева внизу", "Справа вверху", "Слева вверху")
 
     /** 0 — радуга (переливается). */
@@ -104,14 +105,16 @@ data class BuddyLook(
     val sizeDp: Int = 84,
     val corner: Int = 0,
     val opacity: Float = 1f,
-    // Звук
-    val voice: Boolean = true,
-    val voicePitch: Float = 1.3f,
-    val voiceRate: Float = 1.05f,
+    // Звук: 0 — мультяшный лепет, 1 — голос телефона, 2 — без голоса
+    val voiceMode: Int = 0,
+    val voiceName: String = "",
+    val voicePitch: Float = 1.0f,
+    val voiceRate: Float = 1.0f,
     val chirps: Boolean = true,
-    // Поведение
+    // Поведение. smart — думает через Claude (нужен ключ), иначе бесплатный режим
+    val smart: Boolean = false,
     val personality: Int = 0,
-    val interval: Int = 30,
+    val interval: Int = 60,
     val model: Int = 0,
     val apiKey: String = "",
     val bubbleSeconds: Int = 8,
@@ -127,6 +130,12 @@ object BuddyState {
     var talking by mutableStateOf(false)
     var bubble by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
+    /** Какое приложение сейчас открыто (сообщает служба спец. возможностей). */
+    var currentApp by mutableStateOf<String?>(null)
+    var currentLabel by mutableStateOf<String?>(null)
+    var appSince = 0L
+    /** Служба спец. возможностей включена — значит, Дружок знает открытое приложение. */
+    var watchingApps by mutableStateOf(false)
     private var loaded = false
 
     fun load(ctx: Context) {
@@ -172,9 +181,12 @@ object BuddyStore {
                 sizeDp = o.optInt("sizeDp", d.sizeDp),
                 corner = o.optInt("corner", d.corner),
                 opacity = o.optDouble("opacity", d.opacity.toDouble()).toFloat(),
-                voice = o.optBoolean("voice", d.voice),
-                voicePitch = o.optDouble("voicePitch", d.voicePitch.toDouble()).toFloat(),
-                voiceRate = o.optDouble("voiceRate", d.voiceRate.toDouble()).toFloat(),
+                voiceMode = o.optInt("voiceMode", d.voiceMode),
+                voiceName = o.optString("voiceName", d.voiceName),
+                // Ключи «2»: старые высота 1.3 и скорость 1.05 звучали плохо — начинаем с нормальных
+                voicePitch = o.optDouble("voicePitch2", d.voicePitch.toDouble()).toFloat(),
+                voiceRate = o.optDouble("voiceRate2", d.voiceRate.toDouble()).toFloat(),
+                smart = o.optBoolean("smart", o.optString("apiKey").isNotBlank()),
                 chirps = o.optBoolean("chirps", d.chirps),
                 personality = o.optInt("personality", d.personality),
                 interval = o.optInt("interval", d.interval),
@@ -195,7 +207,8 @@ object BuddyStore {
             .put("accessory", l.accessory).put("accColor", l.accColor)
             .put("face", l.face).put("aura", l.aura).put("sizeDp", l.sizeDp).put("corner", l.corner)
             .put("opacity", l.opacity.toDouble())
-            .put("voice", l.voice).put("voicePitch", l.voicePitch.toDouble()).put("voiceRate", l.voiceRate.toDouble())
+            .put("voiceMode", l.voiceMode).put("voiceName", l.voiceName).put("smart", l.smart)
+            .put("voicePitch2", l.voicePitch.toDouble()).put("voiceRate2", l.voiceRate.toDouble())
             .put("chirps", l.chirps).put("personality", l.personality).put("interval", l.interval)
             .put("model", l.model).put("apiKey", l.apiKey).put("bubbleSeconds", l.bubbleSeconds)
         prefs(ctx).edit().putString("look", o.toString()).apply()

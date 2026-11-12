@@ -12,8 +12,8 @@ android {
         applicationId = "com.vse.launcher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1 с Дружком"
+        versionCode = 3
+        versionName = "1.2 с Дружком"
     }
 
     // Постоянный ключ (если лежит рядом, в git не хранится): новые версии ставятся поверх старых

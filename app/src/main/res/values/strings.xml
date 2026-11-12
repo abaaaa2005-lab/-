@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">Всё Лаунчер</string>
-    <string name="lock_service_label">Всё Лаунчер: блокировка экрана</string>
-    <string name="lock_service_description">Нужна только для того, чтобы блокировать экран двойным нажатием по рабочему столу. Лаунчер ничего не читает с экрана.</string>
+    <string name="lock_service_label">Всё Лаунчер: блокировка экрана и Дружок</string>
+    <string name="lock_service_description">Блокирует экран двойным нажатием по рабочему столу и сообщает помощнику Дружку название открытого приложения, чтобы он мог про него пошутить. Содержимое экрана не читается и никуда не отправляется.</string>
 </resources>

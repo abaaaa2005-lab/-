@@ -93,6 +93,8 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     private lateinit var params: WindowManager.LayoutParams
     private var grabber: ScreenGrabber? = null
     private val brain = BuddyBrain()
+    private lateinit var free: FreeBrain
+    private var lastAppSeen: String? = null
     private lateinit var voice: BuddyVoice
     private var lastComment = 0L
     private var hideJob: Job? = null
@@ -107,6 +109,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         BuddyState.load(this)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        free = FreeBrain(this)
         voice = BuddyVoice(this) { t -> scope.launch { BuddyState.talking = t } }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Помощник", NotificationManager.IMPORTANCE_LOW))
@@ -148,7 +151,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             scope.launch { loop() }
             scope.launch {
                 delay(600)
-                react(BuddyReply(Emotion.HAPPY, if (BuddyState.seeing) "Привет! Я ${BuddyState.look.name}, теперь я вижу твой экран." else "Привет! Я ${BuddyState.look.name}. Нажми на меня — поболтаем!"))
+                react(if (BuddyState.seeing) BuddyReply(Emotion.HAPPY, "Привет! Я ${BuddyState.look.name}, теперь я вижу твой экран.") else free.greeting())
             }
         } else if (vision) {
             scope.launch { react(BuddyReply(Emotion.EXCITED, "Ура, теперь я всё вижу!")) }
@@ -176,19 +179,48 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
     // ---------------- Логика ----------------
 
-    /** Раз в N секунд смотрит на экран и, если там что-то поменялось, комментирует. */
+    /** Думает через Claude: включён «умный режим» и есть ключ. */
+    private val smart get() = BuddyState.look.smart && BuddyState.look.apiKey.isNotBlank()
+
+    /**
+     * Умный режим: раз в N секунд смотрит на экран и, если там что-то поменялось, комментирует.
+     * Бесплатный: шутит, когда открываешь другое приложение, и иногда — просто так.
+     */
     private suspend fun loop() {
         while (true) {
             delay(1000)
             val every = BuddyState.look.interval
-            if (every <= 0 || paused || BuddyState.busy || grabber == null) continue
-            if (System.currentTimeMillis() - lastComment < every * 1000L) continue
-            comment(auto = true, question = null)
+            if (paused || BuddyState.busy) continue
+            val now = System.currentTimeMillis()
+            if (smart) {
+                if (every <= 0 || grabber == null) continue
+                if (now - lastComment < every * 1000L) continue
+                comment(auto = true, question = null)
+            } else {
+                val app = BuddyState.currentApp
+                // Открыли другое приложение и задержались в нём пару секунд
+                val switched = app != null && app != lastAppSeen && now - BuddyState.appSince > 2500
+                if (switched && now - lastComment > 20_000) {
+                    lastAppSeen = app
+                    if (Math.random() < 0.75) react(free.react(tap = false))
+                    lastComment = now
+                } else if (switched) {
+                    lastAppSeen = app
+                } else if (every > 0 && now - lastComment > every * 2000L) {
+                    react(free.react(tap = false))
+                    lastComment = now
+                }
+            }
         }
     }
 
     private suspend fun comment(auto: Boolean, question: String?) {
         if (BuddyState.busy) return
+        if (!smart) {
+            react(if (question != null) free.answer(question) else free.react(tap = !auto))
+            lastComment = System.currentTimeMillis()
+            return
+        }
         BuddyState.busy = true
         lastComment = System.currentTimeMillis()
         try {
@@ -213,7 +245,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         BuddyState.bubble = r.text
         if (!BuddyState.muted) {
             if (look.chirps) voice.chirp(r.emotion)
-            if (look.voice) scope.launch { delay(if (look.chirps) 350 else 0); voice.say(r.text, BuddyState.look) }
+            if (look.voiceMode != 2) scope.launch { delay(if (look.chirps) 350 else 0); voice.speak(r.text, r.emotion, BuddyState.look) }
         }
         hideJob?.cancel()
         hideJob = scope.launch {
@@ -405,7 +437,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                 modifier = Modifier.fillMaxWidth().clickable { close(); action() }.padding(horizontal = 16.dp, vertical = 10.dp),
             )
             item("🎤  Спросить голосом") { listen() }
-            item("👀  Что на экране?") { poke() }
+            item(if (smart) "👀  Что на экране?" else "😄  Скажи что-нибудь") { poke() }
             item(if (BuddyState.muted) "🔊  Включить звук" else "🔇  Без звука") { BuddyState.muted = !BuddyState.muted; voice.stop() }
             item(if (paused) "▶️  Снова комментировать" else "⏸  Не комментировать сам") { paused = !paused; updateNotification() }
             item("🎨  Настроить образ") {
@@ -431,6 +463,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             .setContentText(
                 when {
                     paused -> "Пауза: комментирует только по нажатию"
+                    !smart -> "Бесплатный режим: шутит про открытые приложения"
                     BuddyState.seeing -> "Смотрит на экран и комментирует"
                     else -> "Экран не видит — нажмите на него, чтобы поболтать"
                 }
