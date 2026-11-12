@@ -180,9 +180,12 @@ fun BuddyScreen(onBack: () -> Unit) {
                         voice.speak("Привет! Я ${l.name}. Так звучит мой голос!", Emotion.HAPPY, l)
                     }
                     SectionTitle("Как говорит")
-                    Chips(Wardrobe.voiceModes, look.voiceMode) { i -> set { it.copy(voiceMode = i) }; listen() }
+                    Chips(Wardrobe.voiceModes.map { it.second }, Wardrobe.voiceModes.indexOfFirst { it.first == look.voiceMode }) { i ->
+                        set { it.copy(voiceMode = Wardrobe.voiceModes[i].first) }; listen()
+                    }
                     Text(
                         when (look.voiceMode) {
+                            3 -> "Живой нейросетевой голос. Работает без интернета и бесплатно. Первая фраза после запуска — через пару секунд, пока голос загружается."
                             0 -> "Как персонажи в играх: милые звуки в ритм фразы, а слова — в облачке."
                             1 -> "Читает фразы вслух голосом телефона. Выберите голос, который нравится больше."
                             else -> "Только облачко с текстом."

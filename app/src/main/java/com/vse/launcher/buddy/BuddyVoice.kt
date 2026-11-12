@@ -26,6 +26,7 @@ data class VoiceOption(val name: String, val label: String)
  * - короткие мелодии эмоций.
  */
 class BuddyVoice(ctx: Context, private val onTalking: (Boolean) -> Unit) {
+    private val appCtx = ctx.applicationContext
     private var ready = false
     @Volatile private var babbling: Thread? = null
 
@@ -70,6 +71,9 @@ class BuddyVoice(ctx: Context, private val onTalking: (Boolean) -> Unit) {
         when (look.voiceMode) {
             0 -> babble(text, emotion, look)
             1 -> say(text, look)
+            3 -> if (PiperVoice.available(appCtx)) {
+                PiperVoice.speak(appCtx, text, look.voicePitch, look.voiceRate, onTalking) { babble(text, emotion, look) }
+            } else babble(text, emotion, look)
         }
     }
 
@@ -86,6 +90,7 @@ class BuddyVoice(ctx: Context, private val onTalking: (Boolean) -> Unit) {
     }
 
     fun stop() {
+        PiperVoice.stop()
         tts.stop()
         babbling?.interrupt()
         babbling = null

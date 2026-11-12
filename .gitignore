@@ -7,3 +7,7 @@ local.properties
 captures/
 .kotlin/
 *.keystore
+
+# Нейроголос: скачивается при сборке
+app/libs/
+app/src/main/assets/piper/

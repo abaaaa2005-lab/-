@@ -11,3 +11,6 @@
 -dontwarn java.lang.reflect.AnnotatedParameterizedType
 -dontwarn java.lang.reflect.AnnotatedType
 -dontwarn com.github.victools.**
+
+# sherpa-onnx (нейроголос): классы вызываются из нативного кода
+-keep class com.k2fsa.sherpa.onnx.** { *; }

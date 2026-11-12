@@ -69,7 +69,8 @@ object Wardrobe {
         "claude-haiku-5-5" to "Claude Haiku 5.5 — самый быстрый и дешёвый",
     )
     val intervals = listOf(15, 30, 60, 120, 300, 0) // 0 — только по нажатию
-    val voiceModes = listOf("Мультяшный лепет", "Голос телефона", "Без голоса")
+    /** Режимы голоса в порядке показа: индекс режима → подпись. */
+    val voiceModes = listOf(3 to "Нейроголос «Ирина»", 0 to "Мультяшный лепет", 1 to "Голос телефона", 2 to "Без голоса")
     val corners = listOf("Справа внизу", "Слева внизу", "Справа вверху", "Слева вверху")
 
     /** 0 — радуга (переливается). */
@@ -105,8 +106,8 @@ data class BuddyLook(
     val sizeDp: Int = 84,
     val corner: Int = 0,
     val opacity: Float = 1f,
-    // Звук: 0 — мультяшный лепет, 1 — голос телефона, 2 — без голоса
-    val voiceMode: Int = 0,
+    // Звук: 0 — мультяшный лепет, 1 — голос телефона, 2 — без голоса, 3 — нейроголос «Ирина»
+    val voiceMode: Int = 3,
     val voiceName: String = "",
     val voicePitch: Float = 1.0f,
     val voiceRate: Float = 1.0f,
@@ -181,7 +182,7 @@ object BuddyStore {
                 sizeDp = o.optInt("sizeDp", d.sizeDp),
                 corner = o.optInt("corner", d.corner),
                 opacity = o.optDouble("opacity", d.opacity.toDouble()).toFloat(),
-                voiceMode = o.optInt("voiceMode", d.voiceMode),
+                voiceMode = o.optInt("voiceMode2", d.voiceMode),
                 voiceName = o.optString("voiceName", d.voiceName),
                 // Ключи «2»: старые высота 1.3 и скорость 1.05 звучали плохо — начинаем с нормальных
                 voicePitch = o.optDouble("voicePitch2", d.voicePitch.toDouble()).toFloat(),
@@ -207,7 +208,7 @@ object BuddyStore {
             .put("accessory", l.accessory).put("accColor", l.accColor)
             .put("face", l.face).put("aura", l.aura).put("sizeDp", l.sizeDp).put("corner", l.corner)
             .put("opacity", l.opacity.toDouble())
-            .put("voiceMode", l.voiceMode).put("voiceName", l.voiceName).put("smart", l.smart)
+            .put("voiceMode2", l.voiceMode).put("voiceName", l.voiceName).put("smart", l.smart)
             .put("voicePitch2", l.voicePitch.toDouble()).put("voiceRate2", l.voiceRate.toDouble())
             .put("chirps", l.chirps).put("personality", l.personality).put("interval", l.interval)
             .put("model", l.model).put("apiKey", l.apiKey).put("bubbleSeconds", l.bubbleSeconds)

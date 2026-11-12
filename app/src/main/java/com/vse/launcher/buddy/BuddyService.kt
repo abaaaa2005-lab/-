@@ -111,6 +111,7 @@ class BuddyService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         free = FreeBrain(this)
         voice = BuddyVoice(this) { t -> scope.launch { BuddyState.talking = t } }
+        if (BuddyState.look.voiceMode == 3) PiperVoice.preload(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Помощник", NotificationManager.IMPORTANCE_LOW))
     }
